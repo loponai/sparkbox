@@ -60,6 +60,8 @@ services:
         limits:
           memory: 128M
           cpus: '0.25'
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD", "wg", "show"]
       interval: 30s

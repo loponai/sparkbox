@@ -272,7 +272,7 @@ app.post('/api/containers/:id/start', requireAuth, async (req, res) => {
 // Allowed config keys that can be modified through the dashboard
 const ALLOWED_CONFIG_KEYS = new Set([
   'SB_DOMAIN', 'TZ', 'SB_ADMIN_PASSWORD_HASH',
-  'PIHOLE_PASSWORD', 'VAULTWARDEN_SIGNUPS',
+  'PIHOLE_PASSWORD', 'VAULTWARDEN_SIGNUPS', 'VAULTWARDEN_DOMAIN',
   'NEXTCLOUD_DB_PASSWORD', 'NEXTCLOUD_DB_ROOT_PASSWORD',
   'WG_HOST',
 ]);

@@ -51,7 +51,7 @@ const MODULE_INFO = {
     description: 'Connect securely to your server from anywhere using WireGuard. Access all your services as if you were sitting right next to your server.',
     services: ['sb-wg-easy'],
     required: false,
-    icon: 'lock',
+    icon: 'globe',
     ram: '~30MB'
   },
   files: {

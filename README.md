@@ -457,7 +457,7 @@ A: `sparkbox down && rm -rf /opt/sparkbox`. This stops all containers and remove
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+All Rights Reserved — see [LICENSE](LICENSE) for details. No copying, modification, or commercial use without written permission.
 
 ---
 
