@@ -1,0 +1,157 @@
+# ==========================================
+# SPARKBOX - Privacy Module
+# Pi-hole + Vaultwarden + Authelia
+# DNS ad-blocking, password management, SSO/2FA
+# ==========================================
+
+x-sparkbox:
+  id: privacy
+  title: "Privacy & Security"
+  tagline: "Block ads, store passwords, protect logins"
+  description: "Block ads and trackers across your entire network (Pi-hole), store passwords securely with a private Bitwarden server (Vaultwarden), and add two-factor authentication in front of your services (Authelia)."
+  icon: "shield"
+  category: "privacy"
+  required: false
+  ram: "~250MB"
+  tips:
+    before_install: "Pi-hole replaces your DNS. All devices on your network will have ads blocked automatically."
+  services:
+    pihole:
+      friendly_name: "Pi-hole"
+      description: "Network-wide ad and tracker blocker"
+      port_map: 8053
+      tip: "Check the Pi-hole dashboard to see how many ads were blocked today"
+    vaultwarden:
+      friendly_name: "Vaultwarden"
+      description: "Private password manager compatible with Bitwarden apps"
+      port_map: 8222
+      tip: "Install the Bitwarden browser extension and point it at your server"
+    authelia:
+      friendly_name: "Authelia"
+      description: "SSO and two-factor authentication for your services"
+      port_map: 9091
+      tip: "Set up 2FA with an authenticator app for maximum security"
+
+networks:
+  sb_proxy:
+    external: true
+  sb_privacy:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.1.0/24
+
+services:
+  # --- Pi-hole ---
+  # Network-wide DNS ad blocker
+  pihole:
+    image: pihole/pihole:2024.07.0
+    container_name: sb-pihole
+    ports:
+      - "127.0.0.1:53:53/tcp"   # Localhost only - containers use Docker DNS
+      - "127.0.0.1:53:53/udp"
+      - "127.0.0.1:8053:80"     # Pi-hole Admin - access via reverse proxy
+    environment:
+      - TZ=${TZ:-UTC}
+      - WEBPASSWORD=${PIHOLE_PASSWORD}
+      - DNSMASQ_LISTENING=local
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/privacy/config/pihole/etc:/etc/pihole
+      - ${SB_ROOT:-/opt/sparkbox}/modules/privacy/config/pihole/dnsmasq:/etc/dnsmasq.d
+    networks:
+      sb_privacy:
+        ipv4_address: 172.20.1.2
+      sb_proxy:
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.50'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "dig", "+norecurse", "+retry=0", "@127.0.0.1", "pi.hole"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always
+
+  # --- Vaultwarden ---
+  # Lightweight Bitwarden-compatible password manager
+  vaultwarden:
+    image: vaultwarden/server:1.32.7
+    container_name: sb-vaultwarden
+    ports:
+      - "127.0.0.1:8222:80"    # Localhost only - access via reverse proxy
+    environment:
+      - TZ=${TZ:-UTC}
+      - DOMAIN=${VAULTWARDEN_DOMAIN:-https://vault.${SB_DOMAIN:-localhost}}
+      - SIGNUPS_ALLOWED=${VAULTWARDEN_SIGNUPS:-false}
+      - ADMIN_TOKEN=${VAULTWARDEN_ADMIN_TOKEN}
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/privacy/config/vaultwarden:/data
+    networks:
+      - sb_privacy
+      - sb_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.50'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/alive"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always
+
+  # --- Authelia ---
+  # SSO and 2FA authentication portal
+  authelia:
+    image: authelia/authelia:4.38
+    container_name: sb-authelia
+    ports:
+      - "127.0.0.1:9091:9091"  # Localhost only - access via reverse proxy
+    environment:
+      - TZ=${TZ:-UTC}
+      - AUTHELIA_JWT_SECRET=${AUTHELIA_JWT_SECRET}
+      - AUTHELIA_SESSION_SECRET=${AUTHELIA_SESSION_SECRET}
+      - AUTHELIA_STORAGE_ENCRYPTION_KEY=${AUTHELIA_STORAGE_ENCRYPTION_KEY}
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/privacy/config/authelia:/config
+    networks:
+      - sb_privacy
+      - sb_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.25'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9091/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always

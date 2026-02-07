@@ -1,0 +1,145 @@
+# ==========================================
+# SPARKBOX - Core Module
+# Nginx Proxy Manager + Portainer + Homepage
+# Always active - provides reverse proxy, container management, and dashboard
+# ==========================================
+
+x-sparkbox:
+  id: core
+  title: "Core Infrastructure"
+  tagline: "The foundation of your server"
+  description: "The essential foundation: a reverse proxy to route your domain to the right service with free SSL certificates, a container manager for troubleshooting, and a start page to find everything."
+  icon: "building"
+  category: "system"
+  required: true
+  ram: "~300MB"
+  services:
+    npm:
+      friendly_name: "Nginx Proxy Manager"
+      description: "Routes your domain to the right service and manages SSL certificates"
+      port_map: 81
+      tip: "Set up subdomains like vault.yourdomain.com for each service"
+    portainer:
+      friendly_name: "Portainer"
+      description: "Visual tool for managing Docker containers, checking logs, and debugging"
+      port_map: 9000
+      tip: "Useful for troubleshooting. If a service won't start, check its logs here."
+    homepage:
+      friendly_name: "Homepage"
+      description: "A personal start page showing all your services with live status"
+      port_map: 3000
+      tip: "Bookmark this as your browser homepage for quick access to everything"
+
+networks:
+  sb_proxy:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+
+services:
+  # --- Nginx Proxy Manager ---
+  # Reverse proxy with SSL certificate management
+  npm:
+    image: jc21/nginx-proxy-manager:2.12.1
+    container_name: sb-npm
+    ports:
+      - "80:80"
+      - "443:443"
+      - "127.0.0.1:81:81"    # NPM Admin UI (localhost only - access via reverse proxy)
+    environment:
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/core/config/npm/data:/data
+      - ${SB_ROOT:-/opt/sparkbox}/modules/core/config/npm/letsencrypt:/etc/letsencrypt
+    networks:
+      - sb_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.50'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:81/api/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always
+
+  # --- Portainer ---
+  # Docker container management UI
+  portainer:
+    image: portainer/portainer-ce:2.21.5
+    container_name: sb-portainer
+    ports:
+      - "127.0.0.1:9000:9000"  # Localhost only - access via reverse proxy + Authelia
+    environment:
+      - TZ=${TZ:-UTC}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${SB_ROOT:-/opt/sparkbox}/modules/core/config/portainer:/data
+    networks:
+      - sb_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.50'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9000/api/system/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always
+
+  # --- Homepage ---
+  # Application dashboard with service integration
+  homepage:
+    image: ghcr.io/gethomepage/homepage:v0.10
+    container_name: sb-homepage
+    ports:
+      - "127.0.0.1:3000:3000"  # Localhost only - access via reverse proxy
+    environment:
+      - TZ=${TZ:-UTC}
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/core/config/homepage:/app/config
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - sb_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.50'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always

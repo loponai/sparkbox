@@ -1,0 +1,150 @@
+# ==========================================
+# SPARKBOX - Cloud Module
+# Nextcloud + MariaDB + Redis
+# Self-hosted file sync and collaboration
+# ==========================================
+
+x-sparkbox:
+  id: cloud
+  title: "Cloud Storage"
+  tagline: "Your own private Google Drive"
+  description: "Sync files between your phone, laptop, and server. Share files with links. Includes calendar and contacts too. Powered by Nextcloud with a fast MariaDB database and Redis cache."
+  icon: "cloud"
+  category: "productivity"
+  required: false
+  ram: "~500MB"
+  tips:
+    before_install: "Nextcloud needs a domain name with SSL for the mobile apps to connect. Set up your domain in Nginx Proxy Manager first."
+  services:
+    nextcloud:
+      friendly_name: "Nextcloud"
+      description: "File sync, sharing, calendar, contacts, and collaboration"
+      port_map: 8444
+      tip: "Install the Nextcloud app on your phone and computer for automatic sync"
+    nextcloud-db:
+      friendly_name: "MariaDB"
+      description: "Database backend for Nextcloud (background service)"
+      port_map: null
+      tip: "Runs in the background. If it stops, Nextcloud will stop working."
+    nextcloud-redis:
+      friendly_name: "Redis Cache"
+      description: "Speed booster for Nextcloud (background service)"
+      port_map: null
+      tip: "Keeps frequently accessed data in memory for faster performance"
+
+networks:
+  sb_proxy:
+    external: true
+  sb_cloud:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.2.0/24
+
+services:
+  # --- Nextcloud ---
+  # Self-hosted file sync, calendar, contacts
+  nextcloud:
+    image: lscr.io/linuxserver/nextcloud:30.0.4
+    container_name: sb-nextcloud
+    ports:
+      - "127.0.0.1:8444:443"  # Localhost only (port 8444 to avoid dashboard conflict)
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/cloud/config/nextcloud/config:/config
+      - ${SB_ROOT:-/opt/sparkbox}/modules/cloud/config/nextcloud/data:/data
+    depends_on:
+      nextcloud-db:
+        condition: service_healthy
+      nextcloud-redis:
+        condition: service_healthy
+    networks:
+      - sb_cloud
+      - sb_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.00'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-fk", "https://localhost:443/status.php"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always
+
+  # --- MariaDB ---
+  # Database backend for Nextcloud
+  nextcloud-db:
+    image: mariadb:11.6
+    container_name: sb-nextcloud-db
+    environment:
+      - MYSQL_ROOT_PASSWORD=${NEXTCLOUD_DB_ROOT_PASSWORD}
+      - MYSQL_DATABASE=nextcloud
+      - MYSQL_USER=nextcloud
+      - MYSQL_PASSWORD=${NEXTCLOUD_DB_PASSWORD}
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/cloud/config/mariadb:/var/lib/mysql
+    networks:
+      - sb_cloud
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.00'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always
+
+  # --- Redis ---
+  # Cache for Nextcloud performance
+  nextcloud-redis:
+    image: redis:7-alpine
+    container_name: sb-nextcloud-redis
+    environment:
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/cloud/config/redis:/data
+    networks:
+      - sb_cloud
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.25'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always

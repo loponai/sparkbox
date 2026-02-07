@@ -1,0 +1,67 @@
+# ==========================================
+# SPARKBOX - File Browser Module
+# FileBrowser
+# Web-based file manager for your server
+# ==========================================
+
+x-sparkbox:
+  id: files
+  title: "File Browser"
+  tagline: "Manage your server files from the browser"
+  description: "A clean web-based file manager for your server. Browse, upload, download, rename, and organize files without needing SSH or FTP. Great for managing configs and backups."
+  icon: "folder"
+  category: "tools"
+  required: false
+  ram: "~30MB"
+  tips:
+    - "Use this to organize your server files from the browser"
+    - "You can upload files directly from your browser — no FTP client needed"
+  services:
+    filebrowser:
+      friendly_name: "File Browser"
+      description: "Web-based file manager with upload/download support"
+      port_map: 8086
+      tip: "Default login is admin/admin — change the password immediately after first login"
+
+networks:
+  sb_proxy:
+    external: true
+
+services:
+  # --- FileBrowser ---
+  # Web-based file management
+  filebrowser:
+    image: filebrowser/filebrowser:v2.31.2-s6
+    container_name: sb-filebrowser
+    ports:
+      - "127.0.0.1:8086:80"  # Localhost only - access via reverse proxy
+    environment:
+      - TZ=${TZ:-UTC}
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}:/srv/sparkbox:ro
+      - ${SB_ROOT:-/opt/sparkbox}/data:/srv/data
+      - ${SB_ROOT:-/opt/sparkbox}/modules/files/config/filebrowser:/config
+      - ${SB_ROOT:-/opt/sparkbox}/modules/files/config/filebrowser/filebrowser.db:/database/filebrowser.db
+    networks:
+      - sb_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.50'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always

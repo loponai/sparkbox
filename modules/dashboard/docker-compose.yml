@@ -1,0 +1,69 @@
+# ==========================================
+# SPARKBOX - Dashboard Module
+# SparkBox Web Dashboard for module management
+# Always active
+# ==========================================
+
+x-sparkbox:
+  id: dashboard
+  title: "SparkBox Dashboard"
+  tagline: "Your server's control panel"
+  description: "The web interface you're using right now. Manage modules, view logs, configure settings, create backups — all from your browser."
+  icon: "zap"
+  category: "system"
+  required: true
+  ram: "~80MB"
+  services:
+    sparkbox-dashboard:
+      friendly_name: "SparkBox Dashboard"
+      description: "Web management interface for your entire server"
+      port_map: 8443
+      tip: "This is the main dashboard — you're already here!"
+
+services:
+  sparkbox-dashboard:
+    build: ${SB_ROOT:-/opt/sparkbox}/dashboard
+    image: sparkbox/dashboard:latest
+    container_name: sb-dashboard
+    ports:
+      - "127.0.0.1:8443:8443"  # Localhost only - access via reverse proxy
+    environment:
+      - SB_ROOT=/app
+      - SB_ADMIN_PASSWORD_HASH=${SB_ADMIN_PASSWORD_HASH}
+      - SB_SESSION_SECRET=${SB_SESSION_SECRET}
+      - SB_BACKUP_KEY=${SB_BACKUP_KEY:-}
+      - SB_DOMAIN=${SB_DOMAIN:-localhost}
+      - TZ=${TZ:-UTC}
+      - NODE_ENV=production
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${SB_ROOT:-/opt/sparkbox}/.env:/app/.env
+      - ${SB_ROOT:-/opt/sparkbox}/state:/app/state
+      - ${SB_ROOT:-/opt/sparkbox}/modules:/app/modules:ro
+      - ${SB_ROOT:-/opt/sparkbox}/backups:/app/backups
+      - ${SB_ROOT:-/opt/sparkbox}/sparkbox:/app/sparkbox:ro
+    networks:
+      - sb_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.25'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8443/api/auth/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always
+
+networks:
+  sb_proxy:
+    external: true

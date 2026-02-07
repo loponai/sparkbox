@@ -1,0 +1,82 @@
+# ==========================================
+# Homepage Services Configuration
+# Auto-generated based on active SparkBox modules
+# ==========================================
+
+---
+# Core Services
+- Core:
+    - Nginx Proxy Manager:
+        icon: nginx-proxy-manager.png
+        href: "http://{{SB_DOMAIN}}:81"
+        description: Reverse Proxy & SSL
+        server: my-docker
+        container: sb-npm
+    - Portainer:
+        icon: portainer.png
+        href: "http://{{SB_DOMAIN}}:9000"
+        description: Container Management
+        server: my-docker
+        container: sb-portainer
+    - SparkBox Dashboard:
+        icon: home-assistant.png
+        href: "http://{{SB_DOMAIN}}:8443"
+        description: SparkBox Management
+        server: my-docker
+        container: sb-dashboard
+
+# Privacy Services (if enabled)
+{{#if_privacy}}
+- Privacy:
+    - Pi-hole:
+        icon: pi-hole.png
+        href: "http://{{SB_DOMAIN}}:8053/admin"
+        description: DNS Ad Blocker
+        server: my-docker
+        container: sb-pihole
+    - Vaultwarden:
+        icon: vaultwarden.png
+        href: "http://{{SB_DOMAIN}}:8222"
+        description: Password Manager
+        server: my-docker
+        container: sb-vaultwarden
+    - Authelia:
+        icon: authelia.png
+        href: "http://{{SB_DOMAIN}}:9091"
+        description: SSO & 2FA
+        server: my-docker
+        container: sb-authelia
+{{/if_privacy}}
+
+# Cloud Services (if enabled)
+{{#if_cloud}}
+- Cloud:
+    - Nextcloud:
+        icon: nextcloud.png
+        href: "https://{{SB_DOMAIN}}:8443"
+        description: File Sync & Collaboration
+        server: my-docker
+        container: sb-nextcloud
+{{/if_cloud}}
+
+# Monitoring (if enabled)
+{{#if_monitoring}}
+- Monitoring:
+    - Uptime Kuma:
+        icon: uptime-kuma.png
+        href: "http://{{SB_DOMAIN}}:3001"
+        description: Service Monitoring
+        server: my-docker
+        container: sb-uptime-kuma
+{{/if_monitoring}}
+
+# VPN Access (if enabled)
+{{#if_vpn}}
+- VPN Access:
+    - WireGuard:
+        icon: wireguard.png
+        href: "http://{{SB_DOMAIN}}:51821"
+        description: VPN Client Management
+        server: my-docker
+        container: sb-wg-easy
+{{/if_vpn}}

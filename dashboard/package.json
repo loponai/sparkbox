@@ -1,0 +1,26 @@
+{
+  "name": "sparkbox-dashboard",
+  "version": "1.0.0",
+  "description": "SparkBox Web Dashboard - Self-Hosted Privacy Stack Manager",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "dockerode": "^4.0.2",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "express-rate-limit": "^8.2.1",
+    "express-session": "^1.18.0",
+    "helmet": "^8.1.0",
+    "js-yaml": "^4.1.1",
+    "socket.io": "^4.7.5"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "author": "Tom Spark",
+  "license": "MIT"
+}

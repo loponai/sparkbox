@@ -1,0 +1,74 @@
+# ==========================================
+# SPARKBOX - VPN Access Module
+# WireGuard via wg-easy
+# Remote access VPN tunnel
+# ==========================================
+
+x-sparkbox:
+  id: vpn
+  title: "Remote Access VPN"
+  tagline: "Access your server from anywhere"
+  description: "Connect securely to your server from anywhere in the world using WireGuard VPN. Access all your services as if you were sitting right next to your server. Includes a simple web UI for managing VPN clients — just scan a QR code with your phone."
+  icon: "globe"
+  category: "network"
+  required: false
+  ram: "~30MB"
+  tips:
+    before_install: "Port 51820/UDP must be open in your firewall. The SparkBox installer configures this automatically."
+  services:
+    wg-easy:
+      friendly_name: "WireGuard"
+      description: "Fast, modern VPN with simple QR-code-based client setup"
+      port_map: 51821
+      tip: "Create a client config, scan the QR code with the WireGuard app, and you're connected"
+
+networks:
+  sb_proxy:
+    external: true
+  sb_vpn:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.6.0/24
+
+services:
+  # --- WireGuard (wg-easy) ---
+  # Simple WireGuard VPN with web UI for client management
+  wg-easy:
+    image: ghcr.io/wg-easy/wg-easy:14
+    container_name: sb-wg-easy
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.src_valid_mark=1
+    ports:
+      - "51820:51820/udp"                    # WireGuard tunnel (must be public)
+      - "127.0.0.1:51821:51821/tcp"          # wg-easy Web UI (localhost only)
+    environment:
+      - WG_HOST=${SB_DOMAIN:-localhost}
+      - PASSWORD_HASH=${WG_PASSWORD_HASH}
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/vpn/config/wireguard:/etc/wireguard
+    networks:
+      - sb_vpn
+      - sb_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.25'
+    healthcheck:
+      test: ["CMD", "wg", "show"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always

@@ -1,0 +1,65 @@
+# ==========================================
+# SPARKBOX - Monitoring Module
+# Uptime Kuma
+# Service uptime monitoring and alerting
+# ==========================================
+
+x-sparkbox:
+  id: monitoring
+  title: "Monitoring"
+  tagline: "Get alerts when something goes down"
+  description: "Keeps an eye on all your services 24/7 and sends you alerts via Telegram, Discord, email, Slack, and 90+ other notification services when something goes down."
+  icon: "activity"
+  category: "system"
+  required: false
+  ram: "~80MB"
+  services:
+    uptime-kuma:
+      friendly_name: "Uptime Kuma"
+      description: "Beautiful uptime monitoring with notifications"
+      port_map: 3001
+      tip: "Set up a Telegram or Discord webhook to get notified when services have problems"
+
+networks:
+  sb_proxy:
+    external: true
+  sb_monitor:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.3.0/24
+
+services:
+  # --- Uptime Kuma ---
+  # Self-hosted monitoring tool
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    container_name: sb-uptime-kuma
+    ports:
+      - "127.0.0.1:3001:3001"  # Localhost only - access via reverse proxy
+    environment:
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/monitoring/config/uptimekuma:/app/data
+    networks:
+      - sb_monitor
+      - sb_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.50'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/api/entry-page"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always

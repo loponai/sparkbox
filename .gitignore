@@ -1,0 +1,30 @@
+# ==========================================
+# SparkBox .gitignore
+# ==========================================
+
+# Environment files (contain secrets!)
+.env
+!.env.example
+
+# Runtime data - configs, databases, media
+modules/*/config/
+modules/*/media/
+state/
+backups/
+
+# Node.js
+node_modules/
+dashboard/node_modules/
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+
+# Claude AI dev
+.claude/
