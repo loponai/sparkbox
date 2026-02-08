@@ -1,0 +1,158 @@
+# ==========================================
+# SPARKBOX - Paperless-ngx Module
+# Document management with OCR
+# ==========================================
+
+x-sparkbox:
+  id: paperless
+  title: "Paperless-ngx"
+  tagline: "Scan, organize, and search your documents"
+  description: "A document management system that transforms your physical documents into a searchable online archive. Automatically OCRs, tags, and sorts your scanned documents."
+  icon: "file-text"
+  category: "documents"
+  required: false
+  default: false
+  ram: "~400MB"
+  theme:
+    emoji: "\uD83D\uDCC4"
+    color: "#17b26a"
+    bg: "rgba(23,178,106,0.12)"
+  tips:
+    - "Email documents to Paperless or drop them in the consume folder to auto-import"
+    - "Set up automatic tagging rules to keep your documents organized"
+  env_vars:
+    PAPERLESS_SECRET_KEY:
+      label: "Secret Key"
+      type: "secret"
+      config_editable: false
+      dangerous: true
+    PAPERLESS_DB_PASSWORD:
+      label: "Database Password"
+      type: "secret"
+      config_editable: false
+      dangerous: true
+  services:
+    paperless:
+      friendly_name: "Paperless-ngx"
+      description: "Document management with OCR, tagging, and full-text search"
+      port_map: 8010
+      tip: "Drop PDFs in the consume folder or use the web uploader to add documents"
+    paperless-db:
+      friendly_name: "Paperless Database"
+      description: "PostgreSQL database for document metadata"
+      port_map: null
+      tip: "Background service — stores your document index"
+    paperless-redis:
+      friendly_name: "Paperless Cache"
+      description: "Redis for task queuing"
+      port_map: null
+      tip: "Background service — handles document processing queue"
+
+networks:
+  sb_proxy:
+    external: true
+  sb_paperless:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.9.0/24
+
+services:
+  paperless:
+    image: ghcr.io/paperless-ngx/paperless-ngx:2.14
+    container_name: sb-paperless
+    ports:
+      - "127.0.0.1:8010:8000"
+    environment:
+      - PAPERLESS_REDIS=redis://paperless-redis:6379
+      - PAPERLESS_DBHOST=paperless-db
+      - PAPERLESS_DBPASS=${PAPERLESS_DB_PASSWORD}
+      - PAPERLESS_SECRET_KEY=${PAPERLESS_SECRET_KEY}
+      - PAPERLESS_TIME_ZONE=${TZ:-UTC}
+      - PAPERLESS_OCR_LANGUAGE=eng
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/paperless/config/data:/usr/src/paperless/data
+      - ${SB_ROOT:-/opt/sparkbox}/modules/paperless/config/media:/usr/src/paperless/media
+      - ${SB_ROOT:-/opt/sparkbox}/modules/paperless/config/consume:/usr/src/paperless/consume
+    depends_on:
+      paperless-db:
+        condition: service_healthy
+      paperless-redis:
+        condition: service_healthy
+    networks:
+      - sb_paperless
+      - sb_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2.00'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always
+
+  paperless-db:
+    image: postgres:16-alpine
+    container_name: sb-paperless-db
+    environment:
+      - POSTGRES_DB=paperless
+      - POSTGRES_USER=paperless
+      - POSTGRES_PASSWORD=${PAPERLESS_DB_PASSWORD}
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/paperless/config/db:/var/lib/postgresql/data
+    networks:
+      - sb_paperless
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.50'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d paperless -U paperless"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always
+
+  paperless-redis:
+    image: redis:7-alpine
+    container_name: sb-paperless-redis
+    networks:
+      - sb_paperless
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.25'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always

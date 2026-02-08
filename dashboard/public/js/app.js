@@ -13,69 +13,83 @@
   function show(el) { el.classList.remove('hidden'); el.classList.add('active'); }
   function hide(el) { el.classList.add('hidden'); el.classList.remove('active'); }
 
-  // --- Service metadata with descriptions ---
+  // --- Dynamic metadata (loaded from API) ---
 
-  const SERVICE_META = {
-    'sb-npm':          { emoji: '\uD83C\uDF10', color: '#ff6b35', bg: 'rgba(255,107,53,0.12)',  name: 'Proxy Manager',  port: 81,
-      desc: 'Routes your domain to the right service and manages SSL certificates (the padlock in your browser).',
-      tip: 'You probably don\'t need to touch this unless you\'re setting up a new subdomain.' },
-    'sb-portainer':    { emoji: '\uD83D\uDC33', color: '#0db7ed', bg: 'rgba(13,183,237,0.12)',  name: 'Portainer',      port: 9000,
-      desc: 'Visual tool for managing your Docker containers. Check logs, restart stuck services, and see what\'s running.',
-      tip: 'Useful for troubleshooting. If a service won\'t start, check its logs here.' },
-    'sb-homepage':     { emoji: '\uD83C\uDFE0', color: '#818cf8', bg: 'rgba(129,140,248,0.12)', name: 'Homepage',       port: 3000,
-      desc: 'A personal start page showing all your services with live status indicators.',
-      tip: 'Bookmark this page for quick access to everything.' },
-    'sb-dashboard':    { emoji: '\u26A1', color: '#a78bfa', bg: 'rgba(167,139,250,0.12)', name: 'Dashboard',      port: 8443,
-      desc: 'This dashboard \u2014 the SparkBox management interface you\'re using right now.',
-      tip: 'You\'re already here!' },
-    'sb-pihole':       { emoji: '\uD83D\uDEE1\uFE0F', color: '#ff453a', bg: 'rgba(255,69,58,0.12)',   name: 'Pi-hole',        port: 8053, path: '/admin',
-      desc: 'Blocks ads and trackers across your entire network. Like an ad-blocker, but for everything.',
-      tip: 'Check the dashboard to see how many ads were blocked today. The number might surprise you.' },
-    'sb-vaultwarden':  { emoji: '\uD83D\uDD10', color: '#0a84ff', bg: 'rgba(10,132,255,0.12)',  name: 'Vaultwarden',    port: 8222,
-      desc: 'Your private password manager. Works with the Bitwarden app on all your devices.',
-      tip: 'Install the Bitwarden browser extension and point it at this server to get started.' },
-    'sb-authelia':     { emoji: '\uD83D\uDD11', color: '#bf5af2', bg: 'rgba(191,90,242,0.12)',  name: 'Authelia',       port: 9091,
-      desc: 'Adds a login page and two-factor authentication in front of your services.',
-      tip: 'Protects your admin panels from unauthorized access. Set up 2FA for maximum security.' },
-    'sb-uptime-kuma':  { emoji: '\uD83D\uDCCA', color: '#30d158', bg: 'rgba(48,209,88,0.12)',   name: 'Uptime Kuma',    port: 3001,
-      desc: 'Monitors all your services and sends alerts when something goes down.',
-      tip: 'Set up Telegram or Discord notifications to get pinged when a service has problems.' },
-    'sb-wg-easy':      { emoji: '\uD83C\uDF0D', color: '#64d2ff', bg: 'rgba(100,210,255,0.12)', name: 'WireGuard',      port: 51821,
-      desc: 'Secure VPN to access your server from anywhere in the world.',
-      tip: 'Create a client config, scan the QR code with the WireGuard app, and you\'re connected.' },
-    'sb-nextcloud':    { emoji: '\u2601\uFE0F', color: '#0a84ff', bg: 'rgba(10,132,255,0.12)',  name: 'Nextcloud',      port: 8444, https: true,
-      desc: 'Your private Google Drive. Sync files, share folders, and collaborate.',
-      tip: 'Install the Nextcloud app on your phone and computer for automatic file sync.' },
-    'sb-nextcloud-db': { emoji: '\uD83D\uDDC4\uFE0F', color: '#8e8e93', bg: 'rgba(142,142,147,0.12)', name: 'Database', port: null,
-      desc: 'Nextcloud\'s database. Runs in the background \u2014 you don\'t need to touch this.',
-      tip: 'This is a background service. If it stops, Nextcloud will stop working too.' },
-    'sb-nextcloud-redis': { emoji: '\u26A1', color: '#ff453a', bg: 'rgba(255,69,58,0.12)', name: 'Cache', port: null,
-      desc: 'Speed booster for Nextcloud. Keeps frequently accessed data in memory.',
-      tip: 'This is a background service. It makes Nextcloud faster.' },
-    'sb-filebrowser':  { emoji: '\uD83D\uDCC1', color: '#5ac8fa', bg: 'rgba(90,200,250,0.12)',  name: 'File Browser',   port: 8086,
-      desc: 'Web-based file manager. Browse, upload, download, and organize files without SSH.',
-      tip: 'Default login is admin/admin \u2014 change the password after first login!' },
+  let _serviceMeta = {};   // keyed by container name (e.g. 'sb-pihole')
+  let _moduleMeta = {};    // keyed by module id (e.g. 'privacy')
+  let _criticalSet = new Set();
+  let _storeData = null;   // cached /api/modules/store response
+
+  const CATEGORY_LABELS = {
+    infrastructure: 'Infrastructure',
+    privacy: 'Privacy & Security',
+    productivity: 'Productivity',
+    cloud: 'Cloud & Files',
+    network: 'Networking',
+    system: 'System',
+    tools: 'Tools',
+    media: 'Media',
+    documents: 'Documents',
+    development: 'Development',
+    automation: 'Automation',
+    communication: 'Communication',
+    other: 'Other'
   };
 
-  const MODULE_META = {
-    core:       { emoji: '\uD83C\uDFD7\uFE0F', color: '#818cf8', bg: 'rgba(129,140,248,0.12)', friendly: 'Core Infrastructure',
-      desc: 'The essential foundation: a reverse proxy to route your domain to the right service, a container manager for troubleshooting, and a start page to find everything.' },
-    dashboard:  { emoji: '\u26A1', color: '#a78bfa', bg: 'rgba(167,139,250,0.12)', friendly: 'SparkBox Dashboard',
-      desc: 'This dashboard! The web interface you\'re using right now to manage your server.' },
-    privacy:    { emoji: '\uD83D\uDEE1\uFE0F', color: '#ff453a', bg: 'rgba(255,69,58,0.12)',   friendly: 'Privacy & Security',
-      desc: 'Block ads and trackers (Pi-hole), store passwords securely (Vaultwarden), and add login protection with two-factor auth (Authelia).' },
-    cloud:      { emoji: '\u2601\uFE0F', color: '#0a84ff', bg: 'rgba(10,132,255,0.12)',  friendly: 'Cloud Storage',
-      desc: 'Your own private Google Drive. Sync files between phone, laptop, and server. Share files with links. Includes calendar and contacts too.' },
-    monitoring: { emoji: '\uD83D\uDCCA', color: '#30d158', bg: 'rgba(48,209,88,0.12)',   friendly: 'Monitoring',
-      desc: 'Keeps an eye on all your services and alerts you if anything goes down. Sends notifications to Telegram, Discord, email, and more.' },
-    vpn:        { emoji: '\uD83C\uDF0D', color: '#64d2ff', bg: 'rgba(100,210,255,0.12)', friendly: 'Remote Access VPN',
-      desc: 'Connect securely to your server from anywhere using WireGuard. Access all your services as if you were sitting right next to your server.' },
-    files:      { emoji: '\uD83D\uDCC1', color: '#5ac8fa', bg: 'rgba(90,200,250,0.12)',  friendly: 'File Browser',
-      desc: 'A web-based file manager for your server. Browse, upload, download, and organize files without needing SSH or FTP.' },
-  };
+  // Load metadata from /api/modules/store and build SERVICE_META + MODULE_META dynamically
+  async function loadMetadata() {
+    if (_storeData) return; // already loaded
+    try {
+      const mods = await api('GET', '/modules/store');
+      _storeData = mods;
 
-  // Critical containers that shouldn't be stopped casually
-  const CRITICAL_CONTAINERS = new Set(['sb-npm', 'sb-dashboard', 'sb-pihole']);
+      _serviceMeta = {};
+      _moduleMeta = {};
+      _criticalSet = new Set();
+
+      for (const mod of mods) {
+        // Build MODULE_META
+        const theme = mod.theme || {};
+        _moduleMeta[mod.id] = {
+          emoji: theme.emoji || '\uD83D\uDCE6',
+          color: theme.color || '#6e6e73',
+          bg: theme.bg || '#f5f5f7',
+          friendly: mod.name,
+          desc: mod.description || ''
+        };
+
+        // Build critical containers set
+        if (mod.critical_services) {
+          for (const cs of mod.critical_services) {
+            _criticalSet.add(cs);
+          }
+        }
+
+        // Build SERVICE_META from services
+        if (mod.services) {
+          for (const svc of mod.services) {
+            const containerName = 'sb-' + svc.id;
+            _serviceMeta[containerName] = {
+              emoji: theme.emoji || '\uD83D\uDCE6',
+              color: theme.color || '#6e6e73',
+              bg: theme.bg || '#f5f5f7',
+              name: svc.name || svc.id,
+              port: svc.port || null,
+              https: svc.https || false,
+              desc: svc.description || '',
+              tip: svc.tip || ''
+            };
+          }
+        }
+      }
+    } catch {
+      // If store endpoint fails, metadata stays empty — graceful fallback
+    }
+  }
+
+  function isCritical(containerName) {
+    return _criticalSet.has(containerName);
+  }
 
   // --- API ---
 
@@ -138,7 +152,7 @@
   }
 
   function meta(name) {
-    return SERVICE_META[name] || { emoji: '\uD83D\uDCE6', color: '#6e6e73', bg: '#f5f5f7', name: name.replace('sb-', ''), port: null, desc: '', tip: '' };
+    return _serviceMeta[name] || { emoji: '\uD83D\uDCE6', color: '#6e6e73', bg: '#f5f5f7', name: name.replace('sb-', ''), port: null, desc: '', tip: '' };
   }
 
   // --- Confirm Dialog ---
@@ -194,9 +208,10 @@
     $('#login-password').focus();
   }
 
-  function showDashboard() {
+  async function showDashboard() {
     hide($('#login-screen'));
     show($('#dashboard'));
+    await loadMetadata();
     initSocket();
     loadHome();
     loadSystemInfo();
@@ -227,6 +242,7 @@
   $('#logout-btn').addEventListener('click', async () => {
     try { await api('POST', '/logout'); } catch {}
     if (socket) socket.disconnect(); socket = null;
+    _storeData = null; // clear cache on logout
     showLogin();
   });
 
@@ -374,7 +390,7 @@
     $('#running-list').innerHTML = containers.map(c => {
       const m = meta(c.name);
       const on = c.state === 'running';
-      const critical = CRITICAL_CONTAINERS.has(c.name);
+      const critical = isCritical(c.name);
       return `
         <div class="running-row">
           <div class="running-icon" style="background:${m.bg}; color:${m.color}">${m.emoji}</div>
@@ -413,8 +429,8 @@
     });
   }
 
-  window.sbAction = async function (action, id, name, isCritical, btnEl) {
-    if (action === 'stop' && isCritical) {
+  window.sbAction = async function (action, id, name, isCrit, btnEl) {
+    if (action === 'stop' && isCrit) {
       const ok = await confirm(
         `Stop ${name}?`,
         `${name} is a critical service. Stopping it may break other services or lock you out. Are you sure?`
@@ -423,7 +439,7 @@
     } else if (action === 'stop') {
       const ok = await confirm(`Stop ${name}?`, `This will shut down ${name}. You can restart it later.`);
       if (!ok) return;
-    } else if (action === 'restart' && isCritical) {
+    } else if (action === 'restart' && isCrit) {
       const ok = await confirm(
         `Restart ${name}?`,
         `${name} is a critical service. It will be briefly unavailable during restart.`
@@ -448,17 +464,6 @@
 
   // --- APPS (App Store) ---
 
-  const CATEGORY_LABELS = {
-    infrastructure: 'Infrastructure',
-    privacy: 'Privacy & Security',
-    productivity: 'Productivity',
-    cloud: 'Cloud & Files',
-    network: 'Networking',
-    system: 'System',
-    tools: 'Tools',
-    other: 'Other'
-  };
-
   let currentStoreFilter = 'all';
 
   async function loadApps() {
@@ -477,7 +482,7 @@
   function renderAppsBasic(modules) {
     const grid = $('#apps-grid');
     grid.innerHTML = modules.map(m => {
-      const mm = MODULE_META[m.id] || { emoji: '\uD83D\uDCE6', color: '#6e6e73', bg: '#f5f5f7', friendly: m.name, desc: m.description };
+      const mm = _moduleMeta[m.id] || { emoji: '\uD83D\uDCE6', color: '#6e6e73', bg: '#f5f5f7', friendly: m.name, desc: m.description };
       return `
         <div class="app-card ${m.enabled ? 'enabled' : ''} ${m.required ? 'required' : ''}">
           <div class="app-top">
@@ -518,12 +523,15 @@
     // Render cards
     const grid = $('#apps-grid');
     grid.innerHTML = filtered.map(m => {
-      const mm = MODULE_META[m.id] || { emoji: '\uD83D\uDCE6', color: '#6e6e73', bg: '#f5f5f7', friendly: m.name };
+      const theme = m.theme || {};
+      const emoji = theme.emoji || '\uD83D\uDCE6';
+      const color = theme.color || '#6e6e73';
+      const bg = theme.bg || '#f5f5f7';
       const escapedName = (m.name || '').replace(/'/g, "\\'");
       return `
         <div class="app-card ${m.enabled ? 'enabled' : ''} ${m.required ? 'required' : ''}">
           <div class="app-top">
-            <div class="app-icon" style="background:${mm.bg}; color:${mm.color}">${mm.emoji}</div>
+            <div class="app-icon" style="background:${bg}; color:${color}">${emoji}</div>
             <div class="toggle-wrap">
               <label class="toggle">
                 <input type="checkbox" ${m.enabled ? 'checked' : ''} ${m.required ? 'disabled' : ''}
@@ -585,6 +593,8 @@
     try {
       await api('POST', `/modules/${id}/${on ? 'enable' : 'disable'}`);
       toast(`${friendlyName} ${on ? 'enabled' : 'disabled'}!`, 'success');
+      _storeData = null; // bust metadata cache
+      await loadMetadata();
       loadApps();
     } catch (err) { toast(err.message, 'error'); loadApps(); }
   };
@@ -621,77 +631,60 @@
 
   async function loadSettings() {
     try {
-      const cfg = await api('GET', '/config');
-      renderSettings(cfg);
+      const [cfg, schema] = await Promise.all([
+        api('GET', '/config'),
+        api('GET', '/config/schema').catch(() => null)
+      ]);
+      renderSettings(cfg, schema);
       const backups = await api('GET', '/backups');
       renderBackups(backups);
     } catch (err) { toast('Could not load settings.', 'error'); }
   }
 
-  const SETTING_TIPS = {
-    TZ: 'Your timezone (e.g., America/New_York)',
-    SB_DOMAIN: 'Your server\'s domain name or IP address',
-    SB_ROOT: 'Where SparkBox is installed (don\'t change this)',
-    PIHOLE_PASSWORD: 'Pi-hole admin panel password',
-    VAULTWARDEN_ADMIN_TOKEN: 'DO NOT CHANGE \u2014 auto-generated security token',
-    AUTHELIA_JWT_SECRET: 'DO NOT CHANGE \u2014 changing this will lock you out',
-    AUTHELIA_SESSION_SECRET: 'DO NOT CHANGE \u2014 changing this will invalidate all sessions',
-    AUTHELIA_STORAGE_ENCRYPTION_KEY: 'DO NOT CHANGE \u2014 changing this can corrupt data',
-    NEXTCLOUD_DB_ROOT_PASSWORD: 'Database root password \u2014 only change if you know what you\'re doing',
-    NEXTCLOUD_DB_PASSWORD: 'Database password \u2014 only change if you know what you\'re doing',
-    WG_PASSWORD_HASH: 'WireGuard admin panel password',
-  };
-
-  const DANGEROUS_KEYS = new Set([
-    'SB_ROOT', 'VAULTWARDEN_ADMIN_TOKEN', 'AUTHELIA_JWT_SECRET',
-    'AUTHELIA_SESSION_SECRET', 'AUTHELIA_STORAGE_ENCRYPTION_KEY'
-  ]);
-
-  function renderSettings(cfg) {
-    const groups = {
-      'General': ['TZ', 'SB_DOMAIN', 'SB_ROOT'],
-      'Privacy': ['PIHOLE_PASSWORD', 'VAULTWARDEN_ADMIN_TOKEN', 'AUTHELIA_JWT_SECRET', 'AUTHELIA_SESSION_SECRET', 'AUTHELIA_STORAGE_ENCRYPTION_KEY'],
-      'Cloud': ['NEXTCLOUD_DB_ROOT_PASSWORD', 'NEXTCLOUD_DB_PASSWORD'],
-      'VPN Access': ['WG_PASSWORD_HASH'],
-    };
-
-    const FRIENDLY = {
-      TZ: 'Timezone', SB_DOMAIN: 'Domain', SB_ROOT: 'Install Path',
-      PIHOLE_PASSWORD: 'Pi-hole Password', VAULTWARDEN_ADMIN_TOKEN: 'Vault Admin Token',
-      AUTHELIA_JWT_SECRET: 'Auth JWT Secret', AUTHELIA_SESSION_SECRET: 'Auth Session Secret',
-      AUTHELIA_STORAGE_ENCRYPTION_KEY: 'Auth Encryption Key',
-      NEXTCLOUD_DB_ROOT_PASSWORD: 'DB Root Password', NEXTCLOUD_DB_PASSWORD: 'DB Password',
-      WG_PASSWORD_HASH: 'WireGuard Password',
-    };
-
+  function renderSettings(cfg, schema) {
     const isSecret = (k) => /PASSWORD|SECRET|TOKEN|KEY|HASH/.test(k);
 
-    $('#settings-cards').innerHTML = Object.entries(groups).map(([title, keys]) => {
-      const isDangerousGroup = title === 'Privacy' || title === 'Cloud';
-      const rows = keys.filter(k => k in cfg).map(k => {
-        const dangerous = DANGEROUS_KEYS.has(k);
+    // If we have a dynamic schema, use it
+    if (schema && schema.length) {
+      $('#settings-cards').innerHTML = schema.map(group => {
+        const hasDangerous = group.keys.some(k => k.dangerous);
+        const rows = group.keys.filter(k => k.key in cfg || k.config_editable === false).map(k => {
+          return `
+          <div class="setting-row ${k.dangerous ? 'dangerous' : ''}">
+            <label class="setting-label">
+              ${esc(k.label)}
+              ${k.tip ? `<span class="setting-tip" title="${esc(k.tip)}">i</span>` : ''}
+              ${k.dangerous ? '<span class="danger-badge">Don\'t change</span>' : ''}
+            </label>
+            <input class="setting-input" type="${isSecret(k.key) ? 'password' : 'text'}"
+                   data-key="${k.key}" value="${cfg[k.key] || ''}" placeholder="${isSecret(k.key) ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' : ''}"
+                   ${k.dangerous || k.config_editable === false ? 'readonly' : ''}>
+          </div>`;
+        }).join('');
+        if (!rows) return '';
         return `
-        <div class="setting-row ${dangerous ? 'dangerous' : ''}">
-          <label class="setting-label">
-            ${FRIENDLY[k] || k}
-            ${SETTING_TIPS[k] ? `<span class="setting-tip" title="${SETTING_TIPS[k]}">i</span>` : ''}
-            ${dangerous ? '<span class="danger-badge">Don\'t change</span>' : ''}
-          </label>
-          <input class="setting-input" type="${isSecret(k) ? 'password' : 'text'}"
-                 data-key="${k}" value="${cfg[k] || ''}" placeholder="${isSecret(k) ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' : ''}"
-                 ${dangerous ? 'readonly' : ''}>
-        </div>`;
+          <div class="settings-group ${hasDangerous ? 'dangerous-group' : ''}">
+            <div class="settings-group-title">
+              ${esc(group.title)}
+              ${hasDangerous ? '<span class="group-warning">Contains security keys \u2014 be careful!</span>' : ''}
+            </div>
+            ${rows}
+          </div>`;
       }).join('');
-      if (!rows) return '';
-      return `
-        <div class="settings-group ${isDangerousGroup ? 'dangerous-group' : ''}">
-          <div class="settings-group-title">
-            ${title}
-            ${isDangerousGroup ? '<span class="group-warning">Contains security keys \u2014 be careful!</span>' : ''}
-          </div>
-          ${rows}
-        </div>`;
-    }).join('');
+      return;
+    }
+
+    // Fallback: render all config keys in a single group
+    $('#settings-cards').innerHTML = `
+      <div class="settings-group">
+        <div class="settings-group-title">Configuration</div>
+        ${Object.entries(cfg).map(([k, v]) => `
+          <div class="setting-row">
+            <label class="setting-label">${esc(k)}</label>
+            <input class="setting-input" type="${isSecret(k) ? 'password' : 'text'}"
+                   data-key="${k}" value="${v || ''}" placeholder="${isSecret(k) ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' : ''}">
+          </div>`).join('')}
+      </div>`;
   }
 
   $('#btn-save-config').addEventListener('click', async () => {
@@ -726,7 +719,7 @@
     el.innerHTML = list.map(b => `
       <div class="backup-row">
         <div class="backup-row-info">
-          <span class="backup-row-name">${b.filename}${b.encrypted ? ' <span class="badge-encrypted">🔒 Encrypted</span>' : ''}</span>
+          <span class="backup-row-name">${b.filename}${b.encrypted ? ' <span class="badge-encrypted">\uD83D\uDD12 Encrypted</span>' : ''}</span>
           <span class="backup-row-meta">${formatBytes(b.size)} \u00b7 ${new Date(b.created).toLocaleDateString()}</span>
         </div>
         <a href="/api/backups/${b.filename}" class="btn-pill" download>Download</a>
@@ -750,7 +743,7 @@
   function renderHelpServices() {
     const el = $('#help-services');
     if (!el) return;
-    el.innerHTML = Object.entries(SERVICE_META)
+    el.innerHTML = Object.entries(_serviceMeta)
       .filter(([, m]) => m.desc)
       .map(([key, m]) => `
         <div class="help-service-card">

@@ -12,9 +12,25 @@ x-sparkbox:
   icon: "cloud"
   category: "productivity"
   required: false
+  default: false
   ram: "~500MB"
+  theme:
+    emoji: "\u2601\uFE0F"
+    color: "#0a84ff"
+    bg: "rgba(10,132,255,0.12)"
   tips:
     before_install: "Nextcloud needs a domain name with SSL for the mobile apps to connect. Set up your domain in Nginx Proxy Manager first."
+  env_vars:
+    NEXTCLOUD_DB_ROOT_PASSWORD:
+      label: "DB Root Password"
+      type: "secret"
+      config_editable: true
+      dangerous: true
+    NEXTCLOUD_DB_PASSWORD:
+      label: "DB Password"
+      type: "secret"
+      config_editable: true
+      dangerous: true
   services:
     nextcloud:
       friendly_name: "Nextcloud"

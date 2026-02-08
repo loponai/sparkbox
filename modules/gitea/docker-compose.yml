@@ -1,0 +1,124 @@
+# ==========================================
+# SPARKBOX - Gitea Module
+# Self-hosted Git service + PostgreSQL
+# ==========================================
+
+x-sparkbox:
+  id: gitea
+  title: "Gitea"
+  tagline: "Your own private Git server"
+  description: "A lightweight, self-hosted Git service. Host your code repositories, manage issues, and collaborate on projects without relying on GitHub or GitLab. Fast, simple, and easy to set up."
+  icon: "git-branch"
+  category: "development"
+  required: false
+  default: false
+  ram: "~200MB"
+  theme:
+    emoji: "\uD83D\uDD27"
+    color: "#6c757d"
+    bg: "rgba(108,117,125,0.12)"
+  tips:
+    - "Create your first repository and push code from your local machine"
+    - "Set up SSH keys for passwordless git push and pull"
+  env_vars:
+    GITEA_DB_PASSWORD:
+      label: "Database Password"
+      type: "secret"
+      config_editable: false
+      dangerous: true
+  services:
+    gitea:
+      friendly_name: "Gitea"
+      description: "Self-hosted Git service with issues, pull requests, and CI/CD"
+      port_map: 3300
+      tip: "Create an account and start pushing repositories right away"
+    gitea-db:
+      friendly_name: "Gitea Database"
+      description: "PostgreSQL database for Gitea metadata"
+      port_map: null
+      tip: "Background service — stores your repository and user data"
+
+networks:
+  sb_proxy:
+    external: true
+  sb_gitea:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.10.0/24
+
+services:
+  # --- Gitea ---
+  # Self-hosted Git service
+  gitea:
+    image: gitea/gitea:1.22
+    container_name: sb-gitea
+    ports:
+      - "127.0.0.1:3300:3000"
+    environment:
+      - TZ=${TZ:-UTC}
+      - GITEA__database__DB_TYPE=postgres
+      - GITEA__database__HOST=gitea-db:5432
+      - GITEA__database__NAME=gitea
+      - GITEA__database__USER=gitea
+      - GITEA__database__PASSWD=${GITEA_DB_PASSWORD}
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/gitea/config/data:/data
+    depends_on:
+      gitea-db:
+        condition: service_healthy
+    networks:
+      - sb_gitea
+      - sb_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.00'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always
+
+  # --- PostgreSQL ---
+  # Database backend for Gitea
+  gitea-db:
+    image: postgres:16-alpine
+    container_name: sb-gitea-db
+    environment:
+      - POSTGRES_DB=gitea
+      - POSTGRES_USER=gitea
+      - POSTGRES_PASSWORD=${GITEA_DB_PASSWORD}
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/gitea/config/db:/var/lib/postgresql/data
+    networks:
+      - sb_gitea
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.50'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d gitea -U gitea"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always

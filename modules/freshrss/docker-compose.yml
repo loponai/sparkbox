@@ -1,0 +1,74 @@
+# ==========================================
+# SPARKBOX - FreshRSS Module
+# Self-hosted RSS feed reader
+# ==========================================
+
+x-sparkbox:
+  id: freshrss
+  title: "FreshRSS"
+  tagline: "Follow your favorite sites in one place"
+  description: "A free, self-hosted RSS feed aggregator. Subscribe to blogs, news sites, and podcasts and read everything in a clean, unified interface. Supports mobile apps and browser extensions."
+  icon: "rss"
+  category: "tools"
+  required: false
+  default: false
+  ram: "~50MB"
+  theme:
+    emoji: "\uD83D\uDCF0"
+    color: "#f5a623"
+    bg: "rgba(245,166,35,0.12)"
+  tips:
+    - "Add your favorite news sites and blogs by pasting their RSS feed URLs"
+    - "Use a mobile RSS app and connect it to your FreshRSS server for reading on the go"
+  services:
+    freshrss:
+      friendly_name: "FreshRSS"
+      description: "RSS feed reader with mobile app support"
+      port_map: 8070
+      tip: "Add feeds by clicking the + icon and pasting any website or RSS URL"
+
+networks:
+  sb_proxy:
+    external: true
+  sb_freshrss:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.11.0/24
+
+services:
+  # --- FreshRSS ---
+  # Self-hosted RSS feed reader
+  freshrss:
+    image: freshrss/freshrss:1.24.3
+    container_name: sb-freshrss
+    ports:
+      - "127.0.0.1:8070:80"
+    environment:
+      - TZ=${TZ:-UTC}
+      - CRON_MIN=1,31
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/freshrss/config/data:/var/www/FreshRSS/data
+      - ${SB_ROOT:-/opt/sparkbox}/modules/freshrss/config/extensions:/var/www/FreshRSS/extensions
+    networks:
+      - sb_freshrss
+      - sb_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.50'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always

@@ -12,9 +12,62 @@ x-sparkbox:
   icon: "shield"
   category: "privacy"
   required: false
+  default: true
   ram: "~250MB"
+  theme:
+    emoji: "\uD83D\uDEE1\uFE0F"
+    color: "#ff453a"
+    bg: "rgba(255,69,58,0.12)"
   tips:
     before_install: "Pi-hole replaces your DNS. All devices on your network will have ads blocked automatically."
+  env_vars:
+    PIHOLE_PASSWORD:
+      label: "Pi-hole Password"
+      type: "password"
+      prompt: "Set a password for the Pi-hole ad-blocker admin panel (leave blank to auto-generate)"
+      config_editable: true
+      dangerous: false
+    VAULTWARDEN_ADMIN_TOKEN:
+      label: "Vault Admin Token"
+      type: "secret"
+      config_editable: false
+      dangerous: true
+    VAULTWARDEN_SIGNUPS:
+      label: "Allow Signups"
+      type: "boolean"
+      default: "false"
+      config_editable: true
+      dangerous: false
+    VAULTWARDEN_DOMAIN:
+      label: "Vault Domain"
+      type: "text"
+      default: "https://vault.${SB_DOMAIN}"
+      config_editable: true
+      dangerous: false
+    AUTHELIA_JWT_SECRET:
+      label: "Auth JWT Secret"
+      type: "secret"
+      config_editable: false
+      dangerous: true
+    AUTHELIA_SESSION_SECRET:
+      label: "Auth Session Secret"
+      type: "secret"
+      config_editable: false
+      dangerous: true
+    AUTHELIA_STORAGE_ENCRYPTION_KEY:
+      label: "Auth Encryption Key"
+      type: "secret"
+      config_editable: false
+      dangerous: true
+  setup:
+    templates:
+      - source: "templates/authelia-config.yml.tmpl"
+        dest: "modules/privacy/config/authelia/configuration.yml"
+        vars:
+          - SB_DOMAIN
+          - AUTHELIA_JWT_SECRET
+          - AUTHELIA_SESSION_SECRET
+          - AUTHELIA_STORAGE_ENCRYPTION_KEY
   services:
     pihole:
       friendly_name: "Pi-hole"

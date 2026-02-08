@@ -1,0 +1,75 @@
+# ==========================================
+# SPARKBOX - Navidrome Module
+# Self-hosted music streaming server
+# ==========================================
+
+x-sparkbox:
+  id: navidrome
+  title: "Navidrome"
+  tagline: "Stream your music collection anywhere"
+  description: "A lightweight, self-hosted music server. Stream your personal music library from any browser or mobile app. Compatible with Subsonic clients like DSub, Symfonium, and more."
+  icon: "music"
+  category: "media"
+  required: false
+  default: false
+  ram: "~80MB"
+  theme:
+    emoji: "\uD83C\uDFB5"
+    color: "#0ea5e9"
+    bg: "rgba(14,165,233,0.12)"
+  tips:
+    - "Drop your music files into the music folder and Navidrome will scan them automatically"
+    - "Install a Subsonic-compatible app like DSub or Symfonium on your phone for mobile streaming"
+  services:
+    navidrome:
+      friendly_name: "Navidrome"
+      description: "Music streaming server with Subsonic API support"
+      port_map: 4533
+      tip: "Add your music to the music folder and it will appear in the library"
+
+networks:
+  sb_proxy:
+    external: true
+  sb_navidrome:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.13.0/24
+
+services:
+  # --- Navidrome ---
+  # Self-hosted music streaming
+  navidrome:
+    image: deluan/navidrome:0.53
+    container_name: sb-navidrome
+    ports:
+      - "127.0.0.1:4533:4533"
+    environment:
+      - TZ=${TZ:-UTC}
+      - ND_SCANSCHEDULE=1h
+      - ND_LOGLEVEL=info
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/navidrome/config:/data
+      - ${SB_ROOT:-/opt/sparkbox}/data/music:/music:ro
+    networks:
+      - sb_navidrome
+      - sb_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.50'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4533/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always

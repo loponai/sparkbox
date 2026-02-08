@@ -12,7 +12,12 @@ x-sparkbox:
   icon: "zap"
   category: "system"
   required: true
+  default: true
   ram: "~80MB"
+  theme:
+    emoji: "\u26A1"
+    color: "#a78bfa"
+    bg: "rgba(167,139,250,0.12)"
   services:
     sparkbox-dashboard:
       friendly_name: "SparkBox Dashboard"

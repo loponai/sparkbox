@@ -16,11 +16,6 @@ SB_ENV_FILE="${SB_ROOT}/.env"
 SB_BACKUP_DIR="${SB_ROOT}/backups"
 SB_VERSION="1.0.0"
 
-# Core modules that are always active
-CORE_MODULES="core dashboard"
-# All available optional modules
-AVAILABLE_MODULES="privacy cloud monitoring vpn files"
-
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -70,14 +65,65 @@ is_module_enabled() {
     grep -qx "${module}" "${SB_MODULES_CONF}" 2>/dev/null
 }
 
+# --- Dynamic module discovery ---
+
+# List all module directories that contain a docker-compose.yml
+discover_modules() {
+    for dir in "${SB_MODULES_DIR}"/*/; do
+        local name
+        name=$(basename "${dir}")
+        if [[ -f "${dir}docker-compose.yml" ]]; then
+            echo "${name}"
+        fi
+    done
+}
+
+# Read a scalar field from x-sparkbox metadata using sed/grep (no dependencies)
+read_sparkbox_field() {
+    local module="$1"
+    local field="$2"
+    local compose="${SB_MODULES_DIR}/${module}/docker-compose.yml"
+    [[ -f "${compose}" ]] || return
+
+    # Extract value after "field:" within x-sparkbox block
+    sed -n '/^x-sparkbox:/,/^[a-z]/p' "${compose}" | \
+        grep -E "^  ${field}:" | head -1 | \
+        sed "s/^  ${field}:[[:space:]]*//" | \
+        sed 's/^"\(.*\)"$/\1/' | sed "s/^'\(.*\)'$/\1/"
+}
+
+# Get core modules (required: true in x-sparkbox)
+get_core_modules() {
+    for mod in $(discover_modules); do
+        local required
+        required=$(read_sparkbox_field "${mod}" "required")
+        if [[ "${required}" == "true" ]]; then
+            echo "${mod}"
+        fi
+    done
+}
+
+# Get optional modules (required: false or not set)
+get_optional_modules() {
+    for mod in $(discover_modules); do
+        local required
+        required=$(read_sparkbox_field "${mod}" "required")
+        if [[ "${required}" != "true" ]]; then
+            echo "${mod}"
+        fi
+    done
+}
+
 is_core_module() {
     local module="$1"
-    [[ " ${CORE_MODULES} " == *" ${module} "* ]]
+    local required
+    required=$(read_sparkbox_field "${module}" "required")
+    [[ "${required}" == "true" ]]
 }
 
 is_valid_module() {
     local module="$1"
-    [[ " ${CORE_MODULES} ${AVAILABLE_MODULES} " == *" ${module} "* ]]
+    [[ -f "${SB_MODULES_DIR}/${module}/docker-compose.yml" ]]
 }
 
 get_compose_args() {
@@ -144,11 +190,14 @@ cmd_status() {
     echo -e "${BOLD}Module Status:${NC}"
     echo ""
 
-    for module in ${CORE_MODULES} ${AVAILABLE_MODULES}; do
+    for module in $(discover_modules); do
+        local title
+        title=$(read_sparkbox_field "${module}" "title")
+        [[ -z "${title}" ]] && title="${module}"
         if is_module_enabled "${module}"; then
-            echo -e "  ${GREEN}●${NC} ${BOLD}${module}${NC} (enabled)"
+            echo -e "  ${GREEN}●${NC} ${BOLD}${module}${NC} (enabled) - ${title}"
         else
-            echo -e "  ${RED}○${NC} ${module} (disabled)"
+            echo -e "  ${RED}○${NC} ${module} (disabled) - ${title}"
         fi
     done
 
@@ -165,31 +214,26 @@ cmd_modules() {
     echo ""
 
     echo -e "  ${BOLD}Always Active:${NC}"
-    for module in ${CORE_MODULES}; do
-        local desc=""
-        case "${module}" in
-            core)      desc="Nginx Proxy Manager + Portainer + Homepage" ;;
-            dashboard) desc="SparkBox Web Dashboard" ;;
-        esac
-        echo -e "    ${GREEN}●${NC} ${BOLD}${module}${NC} - ${desc}"
+    for module in $(get_core_modules); do
+        local title tagline
+        title=$(read_sparkbox_field "${module}" "title")
+        tagline=$(read_sparkbox_field "${module}" "tagline")
+        [[ -z "${title}" ]] && title="${module}"
+        echo -e "    ${GREEN}●${NC} ${BOLD}${module}${NC} - ${title}${tagline:+ — ${tagline}}"
     done
 
     echo ""
     echo -e "  ${BOLD}Optional:${NC}"
-    for module in ${AVAILABLE_MODULES}; do
-        local desc=""
-        case "${module}" in
-            privacy)    desc="Pi-hole + Vaultwarden + Authelia (DNS, passwords, SSO)" ;;
-            cloud)      desc="Nextcloud + MariaDB + Redis (file sync)" ;;
-            monitoring) desc="Uptime Kuma (service monitoring)" ;;
-            vpn)        desc="WireGuard (remote access VPN)" ;;
-            files)      desc="FileBrowser (web-based file manager)" ;;
-        esac
+    for module in $(get_optional_modules); do
+        local title tagline
+        title=$(read_sparkbox_field "${module}" "title")
+        tagline=$(read_sparkbox_field "${module}" "tagline")
+        [[ -z "${title}" ]] && title="${module}"
 
         if is_module_enabled "${module}"; then
-            echo -e "    ${GREEN}●${NC} ${BOLD}${module}${NC} - ${desc}"
+            echo -e "    ${GREEN}●${NC} ${BOLD}${module}${NC} - ${title}${tagline:+ — ${tagline}}"
         else
-            echo -e "    ${RED}○${NC} ${module} - ${desc}"
+            echo -e "    ${RED}○${NC} ${module} - ${title}${tagline:+ — ${tagline}}"
         fi
     done
     echo ""
@@ -199,13 +243,23 @@ cmd_enable() {
     local module="${1:-}"
     if [[ -z "${module}" ]]; then
         log_error "Usage: sparkbox enable <module>"
-        echo "Available modules: ${AVAILABLE_MODULES}"
+        echo "Available modules:"
+        get_optional_modules | while read -r m; do
+            local title
+            title=$(read_sparkbox_field "${m}" "title")
+            echo "  ${m} - ${title}"
+        done
         exit 1
     fi
 
     if ! is_valid_module "${module}"; then
         log_error "Unknown module: ${module}"
-        echo "Available modules: ${AVAILABLE_MODULES}"
+        echo "Available modules:"
+        get_optional_modules | while read -r m; do
+            local title
+            title=$(read_sparkbox_field "${m}" "title")
+            echo "  ${m} - ${title}"
+        done
         exit 1
     fi
 
@@ -407,46 +461,41 @@ cmd_urls() {
 
     local domain="${SB_DOMAIN:-localhost}"
 
-    # Core - always shown
-    echo -e "  ${BOLD}Core:${NC}"
-    echo "    NPM Admin:     http://${domain}:81"
-    echo "    Portainer:      http://${domain}:9000"
-    echo "    Homepage:       http://${domain}:3000"
-    echo "    Dashboard:      http://${domain}:8443"
+    for module in $(get_enabled_modules); do
+        local compose_file="${SB_MODULES_DIR}/${module}/docker-compose.yml"
+        [[ -f "${compose_file}" ]] || continue
 
-    if is_module_enabled "privacy"; then
-        echo ""
-        echo -e "  ${BOLD}Privacy:${NC}"
-        echo "    Pi-hole:        http://${domain}:8053/admin"
-        echo "    Vaultwarden:    http://${domain}:8222"
-        echo "    Authelia:       http://${domain}:9091"
-    fi
+        local title
+        title=$(read_sparkbox_field "${module}" "title")
+        [[ -z "${title}" ]] && title="${module}"
 
-    if is_module_enabled "cloud"; then
-        echo ""
-        echo -e "  ${BOLD}Cloud:${NC}"
-        echo "    Nextcloud:      https://${domain}:8443"
-    fi
+        # Extract port mappings from compose file services
+        local ports_output=""
+        while IFS= read -r line; do
+            local container port svc_name
+            container=$(echo "${line}" | awk '{print $1}')
+            port=$(echo "${line}" | awk '{print $2}')
+            svc_name=$(echo "${line}" | awk '{for(i=3;i<=NF;i++) printf "%s ", $i; print ""}' | sed 's/ *$//')
 
-    if is_module_enabled "monitoring"; then
-        echo ""
-        echo -e "  ${BOLD}Monitoring:${NC}"
-        echo "    Uptime Kuma:    http://${domain}:3001"
-    fi
+            [[ -z "${port}" || "${port}" == "null" ]] && continue
+            ports_output="${ports_output}    ${svc_name:-${container}}: http://${domain}:${port}\n"
+        done < <(
+            # Use sed/awk to extract service key + port_map from x-sparkbox.services
+            sed -n '/^x-sparkbox:/,/^[a-z]/p' "${compose_file}" | \
+            sed -n '/^  services:/,/^  [a-z]/p' | \
+            awk '
+                /^    [a-z]/ { svc=$1; sub(/:$/,"",svc) }
+                /port_map:/ && !/null/ { port=$2; }
+                /friendly_name:/ { gsub(/"/,"",$0); fname=""; for(i=2;i<=NF;i++) fname=fname (i>2?" ":"") $i }
+                /port_map:/ && !/null/ { print "sb-" svc " " port " " fname; fname="" }
+            '
+        )
 
-    if is_module_enabled "vpn"; then
-        echo ""
-        echo -e "  ${BOLD}VPN:${NC}"
-        echo "    wg-easy:        http://${domain}:51821"
-    fi
-
-    if is_module_enabled "files"; then
-        echo ""
-        echo -e "  ${BOLD}Files:${NC}"
-        echo "    FileBrowser:    http://${domain}:8086"
-    fi
-
-    echo ""
+        if [[ -n "${ports_output}" ]]; then
+            echo -e "  ${BOLD}${title}:${NC}"
+            echo -e "${ports_output}"
+        fi
+    done
 }
 
 cmd_install() {
@@ -481,13 +530,17 @@ cmd_help() {
     echo "  help                 Show this help"
     echo ""
     echo -e "${BOLD}Modules:${NC}"
-    echo "  core         Nginx Proxy Manager + Portainer + Homepage (always on)"
-    echo "  dashboard    SparkBox Web Dashboard (always on)"
-    echo "  privacy      Pi-hole + Vaultwarden + Authelia"
-    echo "  cloud        Nextcloud + MariaDB + Redis"
-    echo "  monitoring   Uptime Kuma"
-    echo "  vpn          WireGuard (wg-easy)"
-    echo "  files        FileBrowser (web-based file manager)"
+    for mod in $(discover_modules); do
+        local title required
+        title=$(read_sparkbox_field "${mod}" "title")
+        required=$(read_sparkbox_field "${mod}" "required")
+        [[ -z "${title}" ]] && title="${mod}"
+        if [[ "${required}" == "true" ]]; then
+            echo "  ${mod}$(printf '%*s' $((16 - ${#mod})) '')${title} (always on)"
+        else
+            echo "  ${mod}$(printf '%*s' $((16 - ${#mod})) '')${title}"
+        fi
+    done
     echo ""
 }
 

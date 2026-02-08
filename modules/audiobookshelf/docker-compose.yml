@@ -1,0 +1,72 @@
+# ==========================================
+# SPARKBOX - Audiobookshelf Module
+# Audiobook and podcast server
+# ==========================================
+
+x-sparkbox:
+  id: audiobookshelf
+  title: "Audiobookshelf"
+  tagline: "Listen to your audiobooks and podcasts anywhere"
+  description: "A self-hosted audiobook and podcast server. Stream your audiobook and podcast collections from any device with progress tracking, bookmarks, and chapter support."
+  icon: "headphones"
+  category: "media"
+  required: false
+  default: false
+  ram: "~100MB"
+  theme:
+    emoji: "\uD83C\uDFA7"
+    color: "#50c878"
+    bg: "rgba(80,200,120,0.12)"
+  tips:
+    - "Upload audiobooks or point to your existing audiobook folder to start listening"
+    - "Install the Audiobookshelf app on your phone for mobile listening with sync"
+  services:
+    audiobookshelf:
+      friendly_name: "Audiobookshelf"
+      description: "Audiobook and podcast server with progress tracking and mobile apps"
+      port_map: 13378
+      tip: "Create a library and add your audiobook or podcast folders to get started"
+
+networks:
+  sb_proxy:
+    external: true
+  sb_audiobookshelf:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.16.0/24
+
+services:
+  audiobookshelf:
+    image: ghcr.io/advplyr/audiobookshelf:2.19.2
+    container_name: sb-audiobookshelf
+    ports:
+      - "127.0.0.1:13378:80"
+    environment:
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/audiobookshelf/config:/config
+      - ${SB_ROOT:-/opt/sparkbox}/data/audiobooks:/audiobooks
+      - ${SB_ROOT:-/opt/sparkbox}/data/podcasts:/podcasts
+    networks:
+      - sb_audiobookshelf
+      - sb_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '1.00'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:80/healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always

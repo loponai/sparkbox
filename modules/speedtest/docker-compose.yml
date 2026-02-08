@@ -1,0 +1,72 @@
+# ==========================================
+# SPARKBOX - Speedtest Tracker Module
+# Internet speed monitoring and history
+# ==========================================
+
+x-sparkbox:
+  id: speedtest
+  title: "Speedtest Tracker"
+  tagline: "Monitor your internet speed over time"
+  description: "Automatically runs internet speed tests on a schedule and tracks the results over time. Visualize your download, upload, and ping history with beautiful charts."
+  icon: "zap"
+  category: "tools"
+  required: false
+  default: false
+  ram: "~80MB"
+  theme:
+    emoji: "\uD83C\uDFC3"
+    color: "#00bcd4"
+    bg: "rgba(0,188,212,0.12)"
+  tips:
+    - "Speed tests run automatically on a schedule — check the dashboard for trends"
+    - "Use the settings to adjust how often speed tests run"
+  services:
+    speedtest:
+      friendly_name: "Speedtest Tracker"
+      description: "Automated internet speed testing with historical charts"
+      port_map: 8765
+      tip: "Check the dashboard to see your internet speed history and trends"
+
+networks:
+  sb_proxy:
+    external: true
+  sb_speedtest:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.19.0/24
+
+services:
+  speedtest:
+    image: lscr.io/linuxserver/speedtest-tracker:0.22
+    container_name: sb-speedtest
+    ports:
+      - "127.0.0.1:8765:80"
+    environment:
+      - TZ=${TZ:-UTC}
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/speedtest/config:/config
+    networks:
+      - sb_speedtest
+      - sb_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.50'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always

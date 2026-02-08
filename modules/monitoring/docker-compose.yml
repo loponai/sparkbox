@@ -12,7 +12,12 @@ x-sparkbox:
   icon: "activity"
   category: "system"
   required: false
+  default: true
   ram: "~80MB"
+  theme:
+    emoji: "\uD83D\uDCCA"
+    color: "#30d158"
+    bg: "rgba(48,209,88,0.12)"
   services:
     uptime-kuma:
       friendly_name: "Uptime Kuma"

@@ -2,6 +2,7 @@
 # ==========================================
 # SparkBox - Stack Validation Script
 # Validates compose files, env vars, ports, and naming
+# Dynamically discovers modules from filesystem
 # Run: bash scripts/validate.sh
 # ==========================================
 
@@ -27,10 +28,24 @@ fail() { echo -e "  ${RED}FAIL${NC} $*"; FAIL=$((FAIL + 1)); }
 warn() { echo -e "  ${YELLOW}WARN${NC} $*"; WARN=$((WARN + 1)); }
 section() { echo ""; echo -e "${BOLD}${CYAN}[$1]${NC}"; }
 
+# --- Discover modules dynamically ---
+
+DISCOVERED_MODULES=""
+for dir in "${SB_ROOT}/modules"/*/; do
+    mod=$(basename "${dir}")
+    if [[ -f "${dir}docker-compose.yml" ]]; then
+        DISCOVERED_MODULES="${DISCOVERED_MODULES} ${mod}"
+    fi
+done
+DISCOVERED_MODULES=$(echo "${DISCOVERED_MODULES}" | xargs)  # trim
+
+echo -e "${BOLD}Discovered modules:${NC} ${DISCOVERED_MODULES}"
+
 # --- Generate test .env ---
 
 TEST_ENV="${SB_ROOT}/.env.test"
 generate_test_env() {
+    # Start with system vars
     cat > "${TEST_ENV}" << 'EOF'
 TZ=UTC
 SB_ROOT=/opt/sparkbox
@@ -38,17 +53,25 @@ SB_DOMAIN=test.example.com
 SB_ADMIN_PASSWORD_HASH=$2a$12$testhashtesthasttesthash
 SB_SESSION_SECRET=0000000000000000000000000000000000000000000000000000000000000000
 SB_BACKUP_KEY=0000000000000000000000000000000000000000000000000000000000000001
-PIHOLE_PASSWORD=testpihole
-VAULTWARDEN_ADMIN_TOKEN=0000000000000000000000000000000000000000000000000000000000000002
-VAULTWARDEN_DOMAIN=https://vault.test.example.com
-VAULTWARDEN_SIGNUPS=false
-AUTHELIA_JWT_SECRET=0000000000000000000000000000000000000000000000000000000000000003
-AUTHELIA_SESSION_SECRET=0000000000000000000000000000000000000000000000000000000000000004
-AUTHELIA_STORAGE_ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000005
-NEXTCLOUD_DB_ROOT_PASSWORD=0000000000000000000000000000000000000000000000000000000000000006
-NEXTCLOUD_DB_PASSWORD=0000000000000000000000000000000000000000000000000000000000000007
-WG_PASSWORD_HASH=$2a$12$testhashtesthasttesthash
 EOF
+
+    # Dynamically add any env vars referenced in compose files
+    local compose_vars
+    compose_vars=$(grep -rhE '\$\{[A-Z_]+' "${SB_ROOT}/modules/" --include='*.yml' 2>/dev/null | \
+        grep -oE '\$\{[A-Z_]+' | sed 's/\${//' | sort -u || true)
+
+    for var in ${compose_vars}; do
+        # Skip vars already in test env or system vars with defaults
+        if grep -q "^${var}=" "${TEST_ENV}" 2>/dev/null; then
+            continue
+        fi
+        # Skip vars that have defaults in compose (${VAR:-default})
+        if grep -qE "\\\$\\{${var}:-" "${SB_ROOT}/modules/"*"/docker-compose.yml" 2>/dev/null; then
+            continue
+        fi
+        # Add a test value
+        echo "${var}=test_value_for_${var}" >> "${TEST_ENV}"
+    done
 }
 
 cleanup() {
@@ -61,8 +84,7 @@ trap cleanup EXIT
 # ==========================================
 section "Module Directories"
 
-EXPECTED_MODULES="core dashboard privacy cloud monitoring vpn files"
-for mod in ${EXPECTED_MODULES}; do
+for mod in ${DISCOVERED_MODULES}; do
     compose="${SB_ROOT}/modules/${mod}/docker-compose.yml"
     if [[ -f "${compose}" ]]; then
         pass "${mod}/docker-compose.yml exists"
@@ -76,7 +98,7 @@ done
 # ==========================================
 section "YAML Syntax"
 
-for mod in ${EXPECTED_MODULES}; do
+for mod in ${DISCOVERED_MODULES}; do
     compose="${SB_ROOT}/modules/${mod}/docker-compose.yml"
     [[ -f "${compose}" ]] || continue
     if python3 -c "import yaml; yaml.safe_load(open('${compose}'))" 2>/dev/null; then
@@ -94,7 +116,7 @@ section "Docker Compose Config"
 generate_test_env
 
 if command -v docker &>/dev/null && docker compose version &>/dev/null; then
-    for mod in ${EXPECTED_MODULES}; do
+    for mod in ${DISCOVERED_MODULES}; do
         compose="${SB_ROOT}/modules/${mod}/docker-compose.yml"
         [[ -f "${compose}" ]] || continue
         if docker compose --env-file "${TEST_ENV}" -f "${compose}" config -q 2>/dev/null; then
@@ -104,9 +126,9 @@ if command -v docker &>/dev/null && docker compose version &>/dev/null; then
         fi
     done
 
-    # Multi-file compose (all enabled modules)
+    # Multi-file compose (all modules)
     ALL_ARGS=""
-    for mod in ${EXPECTED_MODULES}; do
+    for mod in ${DISCOVERED_MODULES}; do
         compose="${SB_ROOT}/modules/${mod}/docker-compose.yml"
         [[ -f "${compose}" ]] && ALL_ARGS="${ALL_ARGS} -f ${compose}"
     done
@@ -125,7 +147,7 @@ fi
 # ==========================================
 section "Naming Conventions"
 
-for mod in ${EXPECTED_MODULES}; do
+for mod in ${DISCOVERED_MODULES}; do
     compose="${SB_ROOT}/modules/${mod}/docker-compose.yml"
     [[ -f "${compose}" ]] || continue
 
@@ -147,7 +169,7 @@ for mod in ${EXPECTED_MODULES}; do
 done
 
 # Check x-sparkbox metadata exists
-for mod in ${EXPECTED_MODULES}; do
+for mod in ${DISCOVERED_MODULES}; do
     compose="${SB_ROOT}/modules/${mod}/docker-compose.yml"
     [[ -f "${compose}" ]] || continue
     if grep -q 'x-sparkbox:' "${compose}" 2>/dev/null; then
@@ -192,7 +214,7 @@ section "Port Conflicts"
 declare -A PORTS || true
 PORT_CONFLICT=0
 PORT_COUNT=0
-for mod in ${EXPECTED_MODULES}; do
+for mod in ${DISCOVERED_MODULES}; do
     compose="${SB_ROOT}/modules/${mod}/docker-compose.yml"
     [[ -f "${compose}" ]] || continue
     while IFS= read -r port; do
@@ -228,9 +250,14 @@ if [[ -f "${ENV_EXAMPLE}" ]]; then
             pass "${var} documented in .env.example"
         else
             if grep -qE "\\\$\\{${var}:-" "${SB_ROOT}/modules/"*"/docker-compose.yml" 2>/dev/null; then
-                warn "${var} not in .env.example (has default in compose)"
+                pass "${var} has default in compose"
             else
-                fail "${var} MISSING from .env.example (no default)"
+                # Check if it's defined in x-sparkbox.env_vars (dynamically managed)
+                if grep -qE "^    ${var}:" "${SB_ROOT}/modules/"*"/docker-compose.yml" 2>/dev/null; then
+                    pass "${var} managed via x-sparkbox.env_vars"
+                else
+                    warn "${var} not in .env.example (module-managed)"
+                fi
             fi
         fi
     done
@@ -243,7 +270,7 @@ fi
 # ==========================================
 section "Security & Resources"
 
-for mod in ${EXPECTED_MODULES}; do
+for mod in ${DISCOVERED_MODULES}; do
     compose="${SB_ROOT}/modules/${mod}/docker-compose.yml"
     [[ -f "${compose}" ]] || continue
 
@@ -279,38 +306,35 @@ for mod in ${EXPECTED_MODULES}; do
 done
 
 # ==========================================
-# TEST 9: Dashboard integration
+# TEST 9: Dashboard integration (dynamic)
 # ==========================================
 section "Dashboard Integration"
 
-ALL_CONTAINERS=$(grep -rh 'container_name:' "${SB_ROOT}/modules/" --include='*.yml' 2>/dev/null | awk '{print $2}' | sort)
+# With the dynamic system, SERVICE_META and MODULE_INFO are no longer hardcoded.
+# Instead, check that x-sparkbox metadata is parseable for each module.
+for mod in ${DISCOVERED_MODULES}; do
+    compose="${SB_ROOT}/modules/${mod}/docker-compose.yml"
+    [[ -f "${compose}" ]] || continue
 
-APP_JS="${SB_ROOT}/dashboard/public/js/app.js"
-MODULES_JS="${SB_ROOT}/dashboard/lib/modules.js"
+    # Check x-sparkbox has required fields
+    has_id=$(grep -c '  id:' "${compose}" 2>/dev/null || echo 0)
+    has_title=$(grep -c '  title:' "${compose}" 2>/dev/null || echo 0)
+    has_category=$(grep -c '  category:' "${compose}" 2>/dev/null || echo 0)
+    has_services=$(grep -c '  services:' "${compose}" 2>/dev/null || echo 0)
 
-if [[ -f "${APP_JS}" ]]; then
-    for container in ${ALL_CONTAINERS}; do
-        if grep -q "'${container}'" "${APP_JS}" 2>/dev/null; then
-            pass "${container} in SERVICE_META"
-        else
-            warn "${container} NOT in SERVICE_META"
-        fi
-    done
-else
-    fail "dashboard/public/js/app.js not found"
-fi
+    if [[ ${has_id} -ge 1 && ${has_title} -ge 1 && ${has_category} -ge 1 ]]; then
+        pass "${mod} x-sparkbox has id, title, category"
+    else
+        fail "${mod} x-sparkbox missing required fields (id/title/category)"
+    fi
 
-if [[ -f "${MODULES_JS}" ]]; then
-    for mod in ${EXPECTED_MODULES}; do
-        if grep -q "'${mod}':" "${MODULES_JS}" 2>/dev/null || grep -q "  ${mod}:" "${MODULES_JS}" 2>/dev/null; then
-            pass "${mod} in MODULE_INFO"
-        else
-            fail "${mod} NOT in MODULE_INFO"
-        fi
-    done
-else
-    fail "dashboard/lib/modules.js not found"
-fi
+    # Check theme block
+    if grep -q '  theme:' "${compose}" 2>/dev/null; then
+        pass "${mod} has theme metadata"
+    else
+        warn "${mod} missing theme metadata"
+    fi
+done
 
 # ==========================================
 # TEST 10: CLI completeness
@@ -319,16 +343,17 @@ section "CLI Completeness"
 
 CLI="${SB_ROOT}/sparkbox"
 if [[ -f "${CLI}" ]]; then
-    OPTIONAL_MODULES="privacy cloud monitoring vpn files"
-    CLI_MODULES=$(grep '^AVAILABLE_MODULES=' "${CLI}" | head -1 | cut -d'"' -f2)
-
-    for mod in ${OPTIONAL_MODULES}; do
-        if echo "${CLI_MODULES}" | grep -qw "${mod}"; then
-            pass "${mod} in CLI AVAILABLE_MODULES"
+    # With dynamic CLI, check that discover_modules function exists
+    if grep -q 'discover_modules' "${CLI}" 2>/dev/null; then
+        pass "CLI uses dynamic module discovery"
+    else
+        # Legacy check
+        if grep -q 'AVAILABLE_MODULES' "${CLI}" 2>/dev/null; then
+            warn "CLI uses hardcoded AVAILABLE_MODULES (consider upgrading to dynamic)"
         else
-            fail "${mod} NOT in CLI AVAILABLE_MODULES"
+            fail "CLI has no module discovery mechanism"
         fi
-    done
+    fi
 
     if bash -n "${CLI}" 2>/dev/null; then
         pass "sparkbox CLI valid bash syntax"

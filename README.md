@@ -18,17 +18,61 @@ Think of it like building your own private version of Google Drive + a password 
 
 ## What You Get
 
-| Module | What It Does | Services Included | RAM |
-|--------|-------------|-------------------|-----|
-| **Core** | The foundation — routes domains, manages containers, gives you a start page | Nginx Proxy Manager, Portainer, Homepage | ~300MB |
-| **Dashboard** | Web UI to manage everything from your browser | SparkBox Dashboard | ~80MB |
-| **Privacy** | Blocks ads network-wide, stores passwords, protects logins with 2FA | Pi-hole, Vaultwarden, Authelia | ~250MB |
-| **Cloud** | Your private Google Drive — sync files across all devices | Nextcloud, MariaDB, Redis | ~500MB |
-| **Monitoring** | Watches your services 24/7 and pings you if something dies | Uptime Kuma | ~80MB |
-| **VPN Access** | Connect to your server securely from anywhere in the world | WireGuard (wg-easy) | ~30MB |
-| **File Browser** | Browse, upload, and download files on your server from the browser | FileBrowser | ~30MB |
+SparkBox comes with a built-in **App Store** — toggle any module on or off from the web dashboard with a single click. New apps are added by simply dropping a `docker-compose.yml` into the `modules/` folder.
 
-**Total with everything enabled: ~1.3GB idle** — fits easily on a 4GB VPS with room to spare.
+### Core (Always On)
+
+| Module | What It Does | Services | RAM |
+|--------|-------------|----------|-----|
+| **Core** | Routes domains, manages containers, start page | Nginx Proxy Manager, Portainer, Homepage | ~300MB |
+| **Dashboard** | Web UI to manage everything from your browser | SparkBox Dashboard | ~80MB |
+
+### Privacy & Security
+
+| Module | What It Does | Services | RAM |
+|--------|-------------|----------|-----|
+| **Privacy** | Blocks ads network-wide, stores passwords, 2FA | Pi-hole, Vaultwarden, Authelia | ~250MB |
+| **VPN Access** | Connect to your server securely from anywhere | WireGuard (wg-easy) | ~30MB |
+
+### Media
+
+| Module | What It Does | Services | RAM |
+|--------|-------------|----------|-----|
+| **Jellyfin** | Stream your movies, shows, and music | Jellyfin | ~300MB |
+| **Navidrome** | Stream your music collection | Navidrome | ~80MB |
+| **Audiobookshelf** | Audiobooks and podcasts server | Audiobookshelf | ~100MB |
+| **Immich** | Private Google Photos replacement with AI search | Immich Server, ML, PostgreSQL, Redis | ~1.5GB |
+
+### Productivity & Documents
+
+| Module | What It Does | Services | RAM |
+|--------|-------------|----------|-----|
+| **Cloud** | Private Google Drive — sync files across devices | Nextcloud, MariaDB, Redis | ~500MB |
+| **Paperless-ngx** | Scan, OCR, and organize documents | Paperless, PostgreSQL, Redis | ~400MB |
+| **Mealie** | Recipe manager and meal planner | Mealie | ~100MB |
+| **Stirling PDF** | All-in-one PDF tools | Stirling PDF | ~200MB |
+
+### Tools & Automation
+
+| Module | What It Does | Services | RAM |
+|--------|-------------|----------|-----|
+| **File Browser** | Browse/upload files from the browser | FileBrowser | ~30MB |
+| **FreshRSS** | RSS/Atom feed reader | FreshRSS | ~50MB |
+| **Linkding** | Bookmark manager | Linkding | ~50MB |
+| **n8n** | Workflow automation (like Zapier) | n8n, PostgreSQL | ~300MB |
+| **Changedetection** | Monitor websites for changes | Changedetection, Playwright | ~200MB |
+| **Speedtest Tracker** | Track your internet speed over time | Speedtest Tracker | ~80MB |
+
+### System & Communication
+
+| Module | What It Does | Services | RAM |
+|--------|-------------|----------|-----|
+| **Monitoring** | Watches services 24/7, alerts when down | Uptime Kuma | ~80MB |
+| **Gitea** | Self-hosted Git repositories | Gitea, PostgreSQL | ~200MB |
+| **Gotify** | Push notifications for your server | Gotify | ~30MB |
+| **Homarr** | Beautiful application dashboard | Homarr | ~100MB |
+
+**Minimum with core only: ~380MB** — add modules as you need them. Fits easily on a 4GB VPS.
 
 ---
 
@@ -211,15 +255,7 @@ sparkbox urls
 
 ### Available Modules
 
-```
-core         Nginx Proxy Manager + Portainer + Homepage (always on)
-dashboard    SparkBox Web Dashboard (always on)
-privacy      Pi-hole + Vaultwarden + Authelia
-cloud        Nextcloud + MariaDB + Redis
-monitoring   Uptime Kuma
-vpn          WireGuard (wg-easy)
-files        FileBrowser (web-based file manager)
-```
+Run `sparkbox modules` to see the full list with current status. Modules are discovered dynamically — any folder under `modules/` with a `docker-compose.yml` and `x-sparkbox` metadata will appear automatically.
 
 ---
 
@@ -421,14 +457,29 @@ SparkBox is built with security in mind:
 ├── .env                        # Your configuration (auto-generated secrets)
 ├── state/
 │   └── modules.conf            # Which modules are enabled
-├── modules/
+├── modules/                    # Each subfolder = one app (auto-discovered)
 │   ├── core/                   # Nginx Proxy Manager + Portainer + Homepage
 │   ├── dashboard/              # SparkBox Web Dashboard
 │   ├── privacy/                # Pi-hole + Vaultwarden + Authelia
 │   ├── cloud/                  # Nextcloud + MariaDB + Redis
 │   ├── monitoring/             # Uptime Kuma
 │   ├── vpn/                    # WireGuard
-│   └── files/                  # FileBrowser
+│   ├── files/                  # FileBrowser
+│   ├── jellyfin/               # Media streaming
+│   ├── immich/                 # Photo management
+│   ├── navidrome/              # Music streaming
+│   ├── audiobookshelf/         # Audiobooks & podcasts
+│   ├── paperless/              # Document management
+│   ├── stirling-pdf/           # PDF tools
+│   ├── mealie/                 # Recipe manager
+│   ├── freshrss/               # RSS reader
+│   ├── linkding/               # Bookmarks
+│   ├── n8n/                    # Workflow automation
+│   ├── changedetection/        # Website monitoring
+│   ├── speedtest/              # Internet speed tracking
+│   ├── gitea/                  # Git repositories
+│   ├── gotify/                 # Push notifications
+│   └── homarr/                 # App dashboard
 ├── scripts/                    # Install and setup scripts
 ├── dashboard/                  # Dashboard web app source
 └── backups/                    # Encrypted backup archives
@@ -442,7 +493,7 @@ SparkBox is built with security in mind:
 A: SparkBox itself is free and open source. You only pay for the VPS (~$10-30/month) and optionally a domain (~$10/year).
 
 **Q: Can I add my own services?**
-A: Yes! Create a new folder under `modules/` with a `docker-compose.yml` file. Add `x-sparkbox` metadata to make it appear in the App Store with a description and icon.
+A: Yes! Create a new folder under `modules/` with a `docker-compose.yml` file and an `x-sparkbox` metadata block. It will automatically appear in the App Store dashboard, CLI, and setup wizard — no code changes needed.
 
 **Q: Is this safe to run on the internet?**
 A: Yes. All admin services are behind localhost-only ports and protected by Authelia 2FA. Only the reverse proxy (ports 80/443) and WireGuard (port 51820) are publicly exposed.

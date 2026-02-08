@@ -1,0 +1,71 @@
+# ==========================================
+# SPARKBOX - Homarr Module
+# Application dashboard and organizer
+# ==========================================
+
+x-sparkbox:
+  id: homarr
+  title: "Homarr"
+  tagline: "Your personal application dashboard"
+  description: "A sleek, modern dashboard for all your self-hosted applications. Organize your services with drag-and-drop widgets, integrate with Docker for real-time status, and access everything from one place."
+  icon: "home"
+  category: "system"
+  required: false
+  default: false
+  ram: "~100MB"
+  theme:
+    emoji: "\uD83C\uDFE0"
+    color: "#fa5252"
+    bg: "rgba(250,82,82,0.12)"
+  tips:
+    - "Drag and drop widgets to customize your dashboard layout"
+    - "Homarr can auto-discover Docker containers and show their status"
+  services:
+    homarr:
+      friendly_name: "Homarr"
+      description: "Modern application dashboard with Docker integration"
+      port_map: 7575
+      tip: "Add your services as tiles and organize them into categories"
+
+networks:
+  sb_proxy:
+    external: true
+  sb_homarr:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.21.0/24
+
+services:
+  homarr:
+    image: ghcr.io/homarr-labs/homarr:1.0
+    container_name: sb-homarr
+    ports:
+      - "127.0.0.1:7575:7575"
+    environment:
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/homarr/config:/appdata
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - sb_homarr
+      - sb_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.50'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:7575"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always

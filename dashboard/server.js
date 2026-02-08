@@ -269,13 +269,64 @@ app.post('/api/containers/:id/start', requireAuth, async (req, res) => {
 
 // --- Config Routes ---
 
-// Allowed config keys that can be modified through the dashboard
-const ALLOWED_CONFIG_KEYS = new Set([
-  'SB_DOMAIN', 'TZ', 'SB_ADMIN_PASSWORD_HASH',
-  'PIHOLE_PASSWORD', 'VAULTWARDEN_SIGNUPS', 'VAULTWARDEN_DOMAIN',
-  'NEXTCLOUD_DB_PASSWORD', 'NEXTCLOUD_DB_ROOT_PASSWORD',
-  'WG_HOST',
-]);
+// Always-allowed system config keys
+const SYSTEM_CONFIG_KEYS = new Set(['SB_DOMAIN', 'TZ', 'SB_ADMIN_PASSWORD_HASH']);
+
+// Build allowed config keys dynamically from module env_vars metadata
+async function getAllowedConfigKeys() {
+  const allowed = new Set(SYSTEM_CONFIG_KEYS);
+  try {
+    const mods = await modules.listRich(SB_ROOT);
+    for (const mod of mods) {
+      if (mod.env_vars) {
+        for (const [key, def] of Object.entries(mod.env_vars)) {
+          if (def.config_editable) {
+            allowed.add(key);
+          }
+        }
+      }
+    }
+  } catch {
+    // If metadata fails, fall back to system keys only
+  }
+  return allowed;
+}
+
+// Build config schema dynamically from module env_vars metadata
+async function buildConfigSchema() {
+  const groups = [
+    { title: 'General', keys: [
+      { key: 'TZ', label: 'Timezone', tip: 'Your timezone (e.g., America/New_York)', dangerous: false, type: 'text' },
+      { key: 'SB_DOMAIN', label: 'Domain', tip: "Your server's domain name or IP address", dangerous: false, type: 'text' },
+      { key: 'SB_ROOT', label: 'Install Path', tip: "Where SparkBox is installed (don't change this)", dangerous: true, type: 'text' },
+    ]}
+  ];
+
+  try {
+    const mods = await modules.listRich(SB_ROOT);
+    for (const mod of mods) {
+      if (!mod.env_vars) continue;
+      const keys = [];
+      for (const [key, def] of Object.entries(mod.env_vars)) {
+        keys.push({
+          key,
+          label: def.label || key,
+          tip: def.prompt || '',
+          dangerous: def.dangerous || false,
+          type: def.type || 'text',
+          config_editable: def.config_editable !== false,
+        });
+      }
+      if (keys.length) {
+        groups.push({ title: mod.name, moduleId: mod.id, keys });
+      }
+    }
+  } catch {
+    // If metadata fails, return just system keys
+  }
+
+  return groups;
+}
 
 app.get('/api/config', requireAuth, async (req, res) => {
   try {
@@ -295,12 +346,23 @@ app.get('/api/config', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/config/schema', requireAuth, async (req, res) => {
+  try {
+    const schema = await buildConfigSchema();
+    res.json(schema);
+  } catch (err) {
+    log('ERROR', 'Failed to build config schema', err);
+    res.status(500).json({ error: 'Failed to load config schema.' });
+  }
+});
+
 app.put('/api/config', requireAuth, async (req, res) => {
   try {
-    // Validate keys against allowlist
+    const allowedKeys = await getAllowedConfigKeys();
+    // Validate keys against dynamic allowlist
     const updates = {};
     for (const [key, value] of Object.entries(req.body)) {
-      if (!ALLOWED_CONFIG_KEYS.has(key)) {
+      if (!allowedKeys.has(key)) {
         return res.status(400).json({ error: `Configuration key "${key}" is not allowed.` });
       }
       // Reject values with newlines or shell metacharacters

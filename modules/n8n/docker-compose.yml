@@ -1,0 +1,127 @@
+# ==========================================
+# SPARKBOX - n8n Module
+# Workflow automation platform
+# ==========================================
+
+x-sparkbox:
+  id: n8n
+  title: "n8n"
+  tagline: "Automate anything with visual workflows"
+  description: "A powerful workflow automation tool that lets you connect apps, APIs, and services with a visual editor. Build complex automations without coding using 400+ integrations."
+  icon: "git-branch"
+  category: "automation"
+  required: false
+  default: false
+  ram: "~300MB"
+  theme:
+    emoji: "\u2699\uFE0F"
+    color: "#ff6d5a"
+    bg: "rgba(255,109,90,0.12)"
+  tips:
+    - "Use the workflow templates to quickly set up common automations"
+    - "Connect n8n to other SparkBox services like Gotify for notifications"
+  env_vars:
+    N8N_DB_PASSWORD:
+      label: "Database Password"
+      type: "secret"
+      config_editable: false
+      dangerous: true
+    N8N_ENCRYPTION_KEY:
+      label: "Encryption Key"
+      type: "secret"
+      config_editable: false
+      dangerous: true
+  services:
+    n8n:
+      friendly_name: "n8n"
+      description: "Visual workflow automation with 400+ integrations"
+      port_map: 5678
+      tip: "Start with a workflow template or create a new one from scratch"
+    n8n-db:
+      friendly_name: "n8n Database"
+      description: "PostgreSQL database for workflow data"
+      port_map: null
+      tip: "Background service — stores your workflow configurations and execution history"
+
+networks:
+  sb_proxy:
+    external: true
+  sb_n8n:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.17.0/24
+
+services:
+  n8n:
+    image: n8nio/n8n:1.76
+    container_name: sb-n8n
+    ports:
+      - "127.0.0.1:5678:5678"
+    environment:
+      - TZ=${TZ:-UTC}
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=n8n-db
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=n8n
+      - DB_POSTGRESDB_USER=n8n
+      - DB_POSTGRESDB_PASSWORD=${N8N_DB_PASSWORD}
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/n8n/config:/home/node/.n8n
+    depends_on:
+      n8n-db:
+        condition: service_healthy
+    networks:
+      - sb_n8n
+      - sb_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.00'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5678/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always
+
+  n8n-db:
+    image: postgres:16-alpine
+    container_name: sb-n8n-db
+    environment:
+      - POSTGRES_DB=n8n
+      - POSTGRES_USER=n8n
+      - POSTGRES_PASSWORD=${N8N_DB_PASSWORD}
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/n8n/config/db:/var/lib/postgresql/data
+    networks:
+      - sb_n8n
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.50'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d n8n -U n8n"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always

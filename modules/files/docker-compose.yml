@@ -12,7 +12,12 @@ x-sparkbox:
   icon: "folder"
   category: "tools"
   required: false
+  default: false
   ram: "~30MB"
+  theme:
+    emoji: "\uD83D\uDCC1"
+    color: "#5ac8fa"
+    bg: "rgba(90,200,250,0.12)"
   tips:
     - "Use this to organize your server files from the browser"
     - "You can upload files directly from your browser — no FTP client needed"

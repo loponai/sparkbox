@@ -1,0 +1,71 @@
+# ==========================================
+# SPARKBOX - Jellyfin Module
+# Free media streaming server
+# ==========================================
+
+x-sparkbox:
+  id: jellyfin
+  title: "Jellyfin"
+  tagline: "Stream your movies, shows, and music"
+  description: "A free and open-source media server. Stream your movie, TV, and music collections to any device. No subscriptions, no tracking, just your media."
+  icon: "film"
+  category: "media"
+  required: false
+  default: false
+  ram: "~300MB"
+  theme:
+    emoji: "\uD83C\uDFAC"
+    color: "#aa5cc3"
+    bg: "rgba(170,92,195,0.12)"
+  tips:
+    - "Point Jellyfin to a folder with your media files to start streaming"
+    - "Install the Jellyfin app on your phone, TV, or Roku for playback"
+  services:
+    jellyfin:
+      friendly_name: "Jellyfin"
+      description: "Media streaming server with apps for every platform"
+      port_map: 8096
+      tip: "Create a library and point it at your media folder to get started"
+
+networks:
+  sb_proxy:
+    external: true
+  sb_jellyfin:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.7.0/24
+
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:10.10.6
+    container_name: sb-jellyfin
+    ports:
+      - "127.0.0.1:8096:8096"
+    environment:
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/jellyfin/config:/config
+      - ${SB_ROOT:-/opt/sparkbox}/data/media:/media
+    networks:
+      - sb_jellyfin
+      - sb_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2.00'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8096/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always

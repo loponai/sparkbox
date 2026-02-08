@@ -12,7 +12,15 @@ x-sparkbox:
   icon: "building"
   category: "system"
   required: true
+  default: true
   ram: "~300MB"
+  theme:
+    emoji: "\U0001F3D7\uFE0F"
+    color: "#818cf8"
+    bg: "rgba(129,140,248,0.12)"
+  critical_services:
+    - sb-npm
+    - sb-dashboard
   services:
     npm:
       friendly_name: "Nginx Proxy Manager"

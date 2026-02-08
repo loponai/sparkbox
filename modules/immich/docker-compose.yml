@@ -1,0 +1,188 @@
+# ==========================================
+# SPARKBOX - Immich Module
+# Self-hosted photo and video management
+# ==========================================
+
+x-sparkbox:
+  id: immich
+  title: "Immich"
+  tagline: "Your private Google Photos"
+  description: "A high-performance self-hosted photo and video backup solution with AI-powered search, face recognition, and mobile apps. Replace Google Photos with something you own."
+  icon: "camera"
+  category: "media"
+  required: false
+  default: false
+  ram: "~1.5GB"
+  theme:
+    emoji: "\uD83D\uDCF7"
+    color: "#4250af"
+    bg: "rgba(66,80,175,0.12)"
+  tips:
+    - "Install the Immich mobile app and enable automatic photo backup"
+    - "ML features need extra RAM — 4GB+ recommended for face recognition"
+  env_vars:
+    IMMICH_DB_PASSWORD:
+      label: "Database Password"
+      type: "secret"
+      config_editable: false
+      dangerous: true
+  services:
+    immich-server:
+      friendly_name: "Immich"
+      description: "Photo management server with AI search and mobile backup"
+      port_map: 2283
+      tip: "Install the Immich mobile app to automatically back up your photos"
+    immich-ml:
+      friendly_name: "Immich ML"
+      description: "Machine learning engine for face recognition and smart search"
+      port_map: null
+      tip: "Background service — powers smart search and face recognition"
+    immich-db:
+      friendly_name: "Immich Database"
+      description: "PostgreSQL database for photo metadata"
+      port_map: null
+      tip: "Background service — stores your photo library metadata"
+    immich-redis:
+      friendly_name: "Immich Cache"
+      description: "Redis cache for job processing"
+      port_map: null
+      tip: "Background service — handles job queues"
+
+networks:
+  sb_proxy:
+    external: true
+  sb_immich:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.8.0/24
+
+services:
+  immich-server:
+    image: ghcr.io/immich-app/immich-server:v1.131.3
+    container_name: sb-immich-server
+    ports:
+      - "127.0.0.1:2283:2283"
+    environment:
+      - TZ=${TZ:-UTC}
+      - DB_HOSTNAME=immich-db
+      - DB_USERNAME=immich
+      - DB_PASSWORD=${IMMICH_DB_PASSWORD}
+      - DB_DATABASE_NAME=immich
+      - REDIS_HOSTNAME=immich-redis
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/immich/config/upload:/usr/src/app/upload
+    depends_on:
+      immich-db:
+        condition: service_healthy
+      immich-redis:
+        condition: service_healthy
+    networks:
+      - sb_immich
+      - sb_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2.00'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:2283/api/server/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always
+
+  immich-ml:
+    image: ghcr.io/immich-app/immich-machine-learning:v1.131.3
+    container_name: sb-immich-ml
+    environment:
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/immich/config/model-cache:/cache
+    networks:
+      - sb_immich
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.00'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3003/ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always
+
+  immich-db:
+    image: tensorchord/pgvecto-rs:pg16-v0.2.1
+    container_name: sb-immich-db
+    environment:
+      - POSTGRES_USER=immich
+      - POSTGRES_PASSWORD=${IMMICH_DB_PASSWORD}
+      - POSTGRES_DB=immich
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/immich/config/db:/var/lib/postgresql/data
+    networks:
+      - sb_immich
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.00'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d immich -U immich"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always
+
+  immich-redis:
+    image: redis:7-alpine
+    container_name: sb-immich-redis
+    environment:
+      - TZ=${TZ:-UTC}
+    networks:
+      - sb_immich
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.25'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always

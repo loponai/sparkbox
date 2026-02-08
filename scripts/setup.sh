@@ -2,6 +2,7 @@
 # ==========================================
 # SparkBox - Interactive Setup Wizard
 # Configures modules, generates .env, deploys stack
+# Dynamically reads module metadata from x-sparkbox
 # ==========================================
 
 set -euo pipefail
@@ -60,6 +61,53 @@ hash_password() {
     echo -n "${password}" | openssl dgst -sha256 | awk '{print $2}'
 }
 
+# Read a scalar field from x-sparkbox metadata
+read_sparkbox_field() {
+    local compose="$1"
+    local field="$2"
+    sed -n '/^x-sparkbox:/,/^[a-z]/p' "${compose}" | \
+        grep -E "^  ${field}:" | head -1 | \
+        sed "s/^  ${field}:[[:space:]]*//" | \
+        sed 's/^"\(.*\)"$/\1/' | sed "s/^'\(.*\)'$/\1/"
+}
+
+# Parse env_vars from x-sparkbox using Node.js + js-yaml (already installed)
+parse_env_vars() {
+    local compose="$1"
+    # Returns JSON array: [{key, type, label, prompt, default}]
+    if command -v node &>/dev/null && [[ -f "${SB_ROOT}/dashboard/node_modules/js-yaml/index.js" ]]; then
+        SB_COMPOSE_PATH="${compose}" SB_YAML_PATH="${SB_ROOT}/dashboard/node_modules/js-yaml" \
+            node -e "
+const yaml=require(process.env.SB_YAML_PATH);
+const fs=require('fs');
+const doc=yaml.load(fs.readFileSync(process.env.SB_COMPOSE_PATH,'utf8'));
+const ev=(doc['x-sparkbox']||{}).env_vars||{};
+const result=Object.entries(ev).map(([k,v])=>({key:k,type:v.type||'text',label:v.label||k,prompt:v.prompt||'',default:v.default||''}));
+console.log(JSON.stringify(result));
+"
+    else
+        echo "[]"
+    fi
+}
+
+# Parse setup.templates from x-sparkbox using Node.js
+parse_setup_templates() {
+    local compose="$1"
+    if command -v node &>/dev/null && [[ -f "${SB_ROOT}/dashboard/node_modules/js-yaml/index.js" ]]; then
+        SB_COMPOSE_PATH="${compose}" SB_YAML_PATH="${SB_ROOT}/dashboard/node_modules/js-yaml" \
+            node -e "
+const yaml=require(process.env.SB_YAML_PATH);
+const fs=require('fs');
+const doc=yaml.load(fs.readFileSync(process.env.SB_COMPOSE_PATH,'utf8'));
+const setup=(doc['x-sparkbox']||{}).setup||{};
+const templates=setup.templates||[];
+console.log(JSON.stringify(templates));
+"
+    else
+        echo "[]"
+    fi
+}
+
 # --- Welcome ---
 
 tui_msgbox "SparkBox Setup" "Welcome to SparkBox! 🎉
@@ -101,17 +149,39 @@ Common examples:
   Australia/Sydney     (Australia)" \
     "UTC")
 
-# --- Module Selection ---
+# --- Module Selection (Dynamic) ---
 
 log_info "Selecting modules..."
 
-SELECTED_MODULES=$(tui_checklist "Choose Your Features" \
-    "Pick which features you want on your server:" \
-    "privacy"    "Block ads + store passwords + protect logins"         "ON" \
-    "cloud"      "Private file sync (like Google Drive, but yours)"    "OFF" \
-    "monitoring" "Get alerts if a service goes down"                    "ON" \
-    "vpn"        "Access your server securely from anywhere"           "OFF" \
-    "files"      "Web-based file manager (browse/upload via browser)"  "OFF")
+# Build checklist args dynamically from module metadata
+CHECKLIST_ARGS=()
+for dir in "${SB_ROOT}/modules"/*/; do
+    compose="${dir}docker-compose.yml"
+    [[ -f "${compose}" ]] || continue
+
+    mod_id=$(read_sparkbox_field "${compose}" "id")
+    [[ -z "${mod_id}" ]] && mod_id=$(basename "${dir}")
+    required=$(read_sparkbox_field "${compose}" "required")
+    [[ "${required}" == "true" ]] && continue  # Skip core modules
+
+    title=$(read_sparkbox_field "${compose}" "title")
+    tagline=$(read_sparkbox_field "${compose}" "tagline")
+    default_val=$(read_sparkbox_field "${compose}" "default")
+
+    [[ -z "${title}" ]] && title="${mod_id}"
+    local_desc="${tagline:-${title}}"
+    local_state="OFF"
+    [[ "${default_val}" == "true" ]] && local_state="ON"
+
+    CHECKLIST_ARGS+=("${mod_id}" "${local_desc}" "${local_state}")
+done
+
+SELECTED_MODULES=""
+if [[ ${#CHECKLIST_ARGS[@]} -gt 0 ]]; then
+    SELECTED_MODULES=$(tui_checklist "Choose Your Features" \
+        "Pick which features you want on your server:" \
+        "${CHECKLIST_ARGS[@]}")
+fi
 
 # Clean up whiptail output (removes quotes)
 SELECTED_MODULES=$(echo "${SELECTED_MODULES}" | tr -d '"')
@@ -142,111 +212,205 @@ SB_ADMIN_PASSWORD_HASH=$(hash_password "${ADMIN_PASSWORD}")
 SB_SESSION_SECRET=$(gen_secret)
 SB_BACKUP_KEY=$(gen_secret)
 
-# --- Module-specific Configuration ---
+# --- Module-specific Configuration (Dynamic) ---
 
-# Privacy settings
-PIHOLE_PASSWORD=""
-VAULTWARDEN_ADMIN_TOKEN=""
-AUTHELIA_JWT_SECRET=""
-AUTHELIA_SESSION_SECRET=""
-AUTHELIA_STORAGE_ENCRYPTION_KEY=""
+# Associative array to store all env var values
+declare -A ENV_VALUES
 
-if echo "${SELECTED_MODULES}" | grep -q "privacy"; then
-    log_info "Configuring privacy module..."
+for module in ${SELECTED_MODULES}; do
+    compose="${SB_ROOT}/modules/${module}/docker-compose.yml"
+    [[ -f "${compose}" ]] || continue
 
-    PIHOLE_PASSWORD=$(tui_password "Pi-hole Password" "Set a password for the Pi-hole ad-blocker admin panel (leave blank to auto-generate):")
-    if [[ -z "${PIHOLE_PASSWORD}" ]]; then
-        PIHOLE_PASSWORD=$(gen_password)
-    fi
+    title=$(read_sparkbox_field "${compose}" "title")
+    [[ -z "${title}" ]] && title="${module}"
 
-    VAULTWARDEN_ADMIN_TOKEN=$(gen_secret)
-    AUTHELIA_JWT_SECRET=$(gen_secret)
-    AUTHELIA_SESSION_SECRET=$(gen_secret)
-    AUTHELIA_STORAGE_ENCRYPTION_KEY=$(gen_secret)
+    env_vars_json=$(parse_env_vars "${compose}")
+    [[ "${env_vars_json}" == "[]" ]] && continue
 
-    # Generate Authelia configuration
-    if [[ -f "${SB_ROOT}/templates/authelia-config.yml.tmpl" ]]; then
-        mkdir -p "${SB_ROOT}/modules/privacy/config/authelia"
-        sed \
-            -e "s|{{SB_DOMAIN}}|${SB_DOMAIN}|g" \
-            -e "s|{{AUTHELIA_JWT_SECRET}}|${AUTHELIA_JWT_SECRET}|g" \
-            -e "s|{{AUTHELIA_SESSION_SECRET}}|${AUTHELIA_SESSION_SECRET}|g" \
-            -e "s|{{AUTHELIA_STORAGE_ENCRYPTION_KEY}}|${AUTHELIA_STORAGE_ENCRYPTION_KEY}|g" \
-            "${SB_ROOT}/templates/authelia-config.yml.tmpl" \
-            > "${SB_ROOT}/modules/privacy/config/authelia/configuration.yml"
-        log_ok "Authelia configuration generated."
-    fi
-fi
+    log_info "Configuring ${title}..."
 
-# Cloud settings
-NEXTCLOUD_DB_ROOT_PASSWORD=""
-NEXTCLOUD_DB_PASSWORD=""
+    # Process each env var based on its type
+    while IFS= read -r var_line; do
+        var_key=$(echo "${var_line}" | sed 's/^"\(.*\)"$/\1/')
+        [[ -z "${var_key}" ]] && continue
 
-if echo "${SELECTED_MODULES}" | grep -q "cloud"; then
-    log_info "Configuring cloud module..."
-    NEXTCLOUD_DB_ROOT_PASSWORD=$(gen_secret)
-    NEXTCLOUD_DB_PASSWORD=$(gen_secret)
-    log_ok "Nextcloud database passwords auto-generated."
-fi
+        var_type=$(SB_COMPOSE_PATH="${compose}" SB_YAML_PATH="${SB_ROOT}/dashboard/node_modules/js-yaml" SB_VAR_KEY="${var_key}" \
+            node -e "
+const yaml=require(process.env.SB_YAML_PATH);
+const fs=require('fs');
+const doc=yaml.load(fs.readFileSync(process.env.SB_COMPOSE_PATH,'utf8'));
+const ev=(doc['x-sparkbox']||{}).env_vars||{};
+const v=ev[process.env.SB_VAR_KEY]||{};
+console.log(v.type||'text');
+" 2>/dev/null || echo "text")
 
-# WireGuard VPN Access settings
-WG_PASSWORD=""
-WG_PASSWORD_HASH=""
+        var_prompt=$(SB_COMPOSE_PATH="${compose}" SB_YAML_PATH="${SB_ROOT}/dashboard/node_modules/js-yaml" SB_VAR_KEY="${var_key}" \
+            node -e "
+const yaml=require(process.env.SB_YAML_PATH);
+const fs=require('fs');
+const doc=yaml.load(fs.readFileSync(process.env.SB_COMPOSE_PATH,'utf8'));
+const ev=(doc['x-sparkbox']||{}).env_vars||{};
+const v=ev[process.env.SB_VAR_KEY]||{};
+console.log(v.prompt||'');
+" 2>/dev/null || echo "")
 
-if echo "${SELECTED_MODULES}" | grep -q "vpn"; then
-    log_info "Configuring VPN access module..."
+        var_default=$(SB_COMPOSE_PATH="${compose}" SB_YAML_PATH="${SB_ROOT}/dashboard/node_modules/js-yaml" SB_VAR_KEY="${var_key}" \
+            node -e "
+const yaml=require(process.env.SB_YAML_PATH);
+const fs=require('fs');
+const doc=yaml.load(fs.readFileSync(process.env.SB_COMPOSE_PATH,'utf8'));
+const ev=(doc['x-sparkbox']||{}).env_vars||{};
+const v=ev[process.env.SB_VAR_KEY]||{};
+console.log(v.default||'');
+" 2>/dev/null || echo "")
 
-    WG_PASSWORD=$(tui_password "WireGuard UI Password" "Set a password for the WireGuard VPN management panel (leave blank to auto-generate):")
-    if [[ -z "${WG_PASSWORD}" ]]; then
-        WG_PASSWORD=$(gen_password)
-    fi
-    # Generate bcrypt hash for wg-easy
-    if command -v docker &>/dev/null; then
-        WG_PASSWORD_HASH=$(docker run --rm ghcr.io/wg-easy/wg-easy wgpw "${WG_PASSWORD}" 2>/dev/null | tail -1 || echo "${WG_PASSWORD}")
-    else
-        WG_PASSWORD_HASH="${WG_PASSWORD}"
-        log_warn "Docker not available to generate bcrypt hash for wg-easy. Password stored as plaintext."
-    fi
-fi
+        case "${var_type}" in
+            secret)
+                ENV_VALUES["${var_key}"]=$(gen_secret)
+                ;;
+            password)
+                local pw_val=""
+                if [[ -n "${var_prompt}" ]]; then
+                    pw_val=$(tui_password "${var_key}" "${var_prompt}")
+                fi
+                if [[ -z "${pw_val}" ]]; then
+                    # Special handling for WG_PASSWORD_HASH - needs bcrypt via docker
+                    if [[ "${var_key}" == "WG_PASSWORD_HASH" ]]; then
+                        local raw_pw
+                        raw_pw=$(gen_password)
+                        if command -v docker &>/dev/null; then
+                            ENV_VALUES["${var_key}"]=$(docker run --rm ghcr.io/wg-easy/wg-easy wgpw "${raw_pw}" 2>/dev/null | tail -1 || echo "${raw_pw}")
+                        else
+                            ENV_VALUES["${var_key}"]="${raw_pw}"
+                        fi
+                        # Save raw password for credentials file
+                        ENV_VALUES["_WG_PASSWORD_RAW"]="${raw_pw}"
+                    else
+                        ENV_VALUES["${var_key}"]=$(gen_password)
+                    fi
+                else
+                    if [[ "${var_key}" == "WG_PASSWORD_HASH" ]]; then
+                        if command -v docker &>/dev/null; then
+                            ENV_VALUES["${var_key}"]=$(docker run --rm ghcr.io/wg-easy/wg-easy wgpw "${pw_val}" 2>/dev/null | tail -1 || echo "${pw_val}")
+                        else
+                            ENV_VALUES["${var_key}"]="${pw_val}"
+                        fi
+                        ENV_VALUES["_WG_PASSWORD_RAW"]="${pw_val}"
+                    else
+                        ENV_VALUES["${var_key}"]="${pw_val}"
+                    fi
+                fi
+                ;;
+            text|path)
+                if [[ -n "${var_prompt}" ]]; then
+                    ENV_VALUES["${var_key}"]=$(tui_input "${var_key}" "${var_prompt}" "${var_default}")
+                elif [[ -n "${var_default}" ]]; then
+                    # Expand SB_DOMAIN in defaults
+                    local expanded
+                    expanded=$(echo "${var_default}" | sed "s/\${SB_DOMAIN}/${SB_DOMAIN}/g")
+                    ENV_VALUES["${var_key}"]="${expanded}"
+                fi
+                ;;
+            boolean)
+                ENV_VALUES["${var_key}"]="${var_default:-false}"
+                ;;
+        esac
+    done < <(echo "${env_vars_json}" | node -e "
+const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+d.forEach(v=>console.log(JSON.stringify(v.key)));
+" 2>/dev/null || true)
+
+    log_ok "${title} configured."
+done
+
+# --- Process setup templates ---
+
+for module in ${SELECTED_MODULES}; do
+    compose="${SB_ROOT}/modules/${module}/docker-compose.yml"
+    [[ -f "${compose}" ]] || continue
+
+    templates_json=$(parse_setup_templates "${compose}")
+    [[ "${templates_json}" == "[]" ]] && continue
+
+    while IFS= read -r tmpl_line; do
+        [[ -z "${tmpl_line}" ]] && continue
+        tmpl_source=$(echo "${tmpl_line}" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(d.source||'')" 2>/dev/null || echo "")
+        tmpl_dest=$(echo "${tmpl_line}" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(d.dest||'')" 2>/dev/null || echo "")
+
+        [[ -z "${tmpl_source}" || -z "${tmpl_dest}" ]] && continue
+
+        local src_path="${SB_ROOT}/${tmpl_source}"
+        local dest_path="${SB_ROOT}/${tmpl_dest}"
+
+        if [[ -f "${src_path}" ]]; then
+            mkdir -p "$(dirname "${dest_path}")"
+            local content
+            content=$(cat "${src_path}")
+
+            # Replace template variables
+            content=$(echo "${content}" | sed \
+                -e "s|{{SB_DOMAIN}}|${SB_DOMAIN}|g")
+
+            # Replace any env_var keys
+            for key in "${!ENV_VALUES[@]}"; do
+                [[ "${key}" == _* ]] && continue  # Skip internal keys
+                content=$(echo "${content}" | sed "s|{{${key}}}|${ENV_VALUES[${key}]}|g")
+            done
+
+            echo "${content}" > "${dest_path}"
+            log_ok "Template rendered: ${tmpl_dest}"
+        fi
+    done < <(echo "${templates_json}" | node -e "
+const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+d.forEach(t=>console.log(JSON.stringify(t)));
+" 2>/dev/null || true)
+done
 
 # --- Generate .env ---
 
 log_info "Generating configuration file..."
 
-cat > "${SB_ROOT}/.env" << ENVEOF
-# ==========================================
-# SPARKBOX - Generated Configuration
-# Generated: $(date)
-# DO NOT share this file - it contains secrets!
-# ==========================================
+{
+    echo "# =========================================="
+    echo "# SPARKBOX - Generated Configuration"
+    echo "# Generated: $(date)"
+    echo "# DO NOT share this file - it contains secrets!"
+    echo "# =========================================="
+    echo ""
+    echo "# --- SYSTEM ---"
+    echo "TZ=${TZ}"
+    echo "SB_ROOT=${SB_ROOT}"
+    echo "SB_DOMAIN=${SB_DOMAIN}"
+    echo ""
+    echo "# --- DASHBOARD ---"
+    echo "SB_ADMIN_PASSWORD_HASH=${SB_ADMIN_PASSWORD_HASH}"
+    echo "SB_SESSION_SECRET=${SB_SESSION_SECRET}"
+    echo "# Backup encryption key - keep this safe! Without it, encrypted backups are unrecoverable."
+    echo "SB_BACKUP_KEY=${SB_BACKUP_KEY}"
 
-# --- SYSTEM ---
-TZ=${TZ}
-SB_ROOT=${SB_ROOT}
-SB_DOMAIN=${SB_DOMAIN}
+    # Write module-specific env vars
+    for module in ${SELECTED_MODULES}; do
+        compose="${SB_ROOT}/modules/${module}/docker-compose.yml"
+        [[ -f "${compose}" ]] || continue
 
-# --- DASHBOARD ---
-SB_ADMIN_PASSWORD_HASH=${SB_ADMIN_PASSWORD_HASH}
-SB_SESSION_SECRET=${SB_SESSION_SECRET}
-# Backup encryption key - keep this safe! Without it, encrypted backups are unrecoverable.
-SB_BACKUP_KEY=${SB_BACKUP_KEY}
+        title=$(read_sparkbox_field "${compose}" "title")
+        [[ -z "${title}" ]] && title="${module}"
 
-# --- PRIVACY MODULE ---
-PIHOLE_PASSWORD=${PIHOLE_PASSWORD}
-VAULTWARDEN_ADMIN_TOKEN=${VAULTWARDEN_ADMIN_TOKEN}
-VAULTWARDEN_DOMAIN=https://vault.${SB_DOMAIN}
-AUTHELIA_JWT_SECRET=${AUTHELIA_JWT_SECRET}
-AUTHELIA_SESSION_SECRET=${AUTHELIA_SESSION_SECRET}
-AUTHELIA_STORAGE_ENCRYPTION_KEY=${AUTHELIA_STORAGE_ENCRYPTION_KEY}
+        env_vars_json=$(parse_env_vars "${compose}")
+        [[ "${env_vars_json}" == "[]" ]] && continue
 
-# --- CLOUD MODULE ---
-NEXTCLOUD_DB_ROOT_PASSWORD=${NEXTCLOUD_DB_ROOT_PASSWORD}
-NEXTCLOUD_DB_PASSWORD=${NEXTCLOUD_DB_PASSWORD}
-
-# --- VPN ACCESS MODULE ---
-WG_PASSWORD_HASH=${WG_PASSWORD_HASH}
-
-ENVEOF
+        echo ""
+        echo "# --- ${title^^} ---"
+        while IFS= read -r var_key; do
+            var_key=$(echo "${var_key}" | sed 's/^"\(.*\)"$/\1/')
+            [[ -z "${var_key}" || "${var_key}" == _* ]] && continue
+            echo "${var_key}=${ENV_VALUES[${var_key}]:-}"
+        done < <(echo "${env_vars_json}" | node -e "
+const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+d.forEach(v=>console.log(JSON.stringify(v.key)));
+" 2>/dev/null || true)
+    done
+} > "${SB_ROOT}/.env"
 
 chmod 600 "${SB_ROOT}/.env"
 log_ok "Configuration saved to ${SB_ROOT}/.env"
@@ -264,14 +428,15 @@ CREDS_FILE="${SB_ROOT}/state/initial-credentials.txt"
     echo "Dashboard: https://${SB_DOMAIN}"
     echo "Password:  ${ADMIN_PASSWORD}"
     echo ""
-    if echo "${SELECTED_MODULES}" | grep -q "privacy"; then
+    # Show module-specific passwords
+    if [[ -n "${ENV_VALUES[PIHOLE_PASSWORD]:-}" ]]; then
         echo "Pi-hole Admin: https://pihole.${SB_DOMAIN}/admin"
-        echo "Password: ${PIHOLE_PASSWORD}"
+        echo "Password: ${ENV_VALUES[PIHOLE_PASSWORD]}"
         echo ""
     fi
-    if echo "${SELECTED_MODULES}" | grep -q "vpn"; then
+    if [[ -n "${ENV_VALUES[_WG_PASSWORD_RAW]:-}" ]]; then
         echo "WireGuard VPN UI: https://wg.${SB_DOMAIN}"
-        echo "Password: ${WG_PASSWORD}"
+        echo "Password: ${ENV_VALUES[_WG_PASSWORD_RAW]}"
         echo ""
     fi
 } > "${CREDS_FILE}"

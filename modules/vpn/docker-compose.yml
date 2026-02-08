@@ -12,9 +12,27 @@ x-sparkbox:
   icon: "globe"
   category: "network"
   required: false
+  default: false
   ram: "~30MB"
+  theme:
+    emoji: "\uD83C\uDF0D"
+    color: "#64d2ff"
+    bg: "rgba(100,210,255,0.12)"
   tips:
     before_install: "Port 51820/UDP must be open in your firewall. The SparkBox installer configures this automatically."
+  env_vars:
+    WG_PASSWORD_HASH:
+      label: "WireGuard Password"
+      type: "password"
+      prompt: "Set a password for the WireGuard VPN management panel (leave blank to auto-generate)"
+      config_editable: true
+      dangerous: false
+    WG_HOST:
+      label: "WireGuard Host"
+      type: "text"
+      default: "${SB_DOMAIN}"
+      config_editable: true
+      dangerous: false
   services:
     wg-easy:
       friendly_name: "WireGuard"

@@ -1,0 +1,70 @@
+# ==========================================
+# SPARKBOX - Gotify Module
+# Self-hosted push notification server
+# ==========================================
+
+x-sparkbox:
+  id: gotify
+  title: "Gotify"
+  tagline: "Send and receive push notifications"
+  description: "A simple self-hosted push notification server. Send notifications from your scripts, services, and automations to your phone or browser with a clean REST API."
+  icon: "bell"
+  category: "communication"
+  required: false
+  default: false
+  ram: "~30MB"
+  theme:
+    emoji: "\uD83D\uDD14"
+    color: "#2196f3"
+    bg: "rgba(33,150,243,0.12)"
+  tips:
+    - "Create an application token and use the REST API to send notifications from scripts"
+    - "Install the Gotify Android app for real-time push notifications on your phone"
+  services:
+    gotify:
+      friendly_name: "Gotify"
+      description: "Push notification server with REST API and mobile apps"
+      port_map: 8880
+      tip: "Create an app token in the web UI to start sending notifications via the API"
+
+networks:
+  sb_proxy:
+    external: true
+  sb_gotify:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.18.0/24
+
+services:
+  gotify:
+    image: gotify/server:2.6
+    container_name: sb-gotify
+    ports:
+      - "127.0.0.1:8880:80"
+    environment:
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/gotify/config:/app/data
+    networks:
+      - sb_gotify
+      - sb_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.50'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always

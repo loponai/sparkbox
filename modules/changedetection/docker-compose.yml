@@ -1,0 +1,107 @@
+# ==========================================
+# SPARKBOX - Changedetection.io Module
+# Website change monitoring with browser support
+# ==========================================
+
+x-sparkbox:
+  id: changedetection
+  title: "Changedetection.io"
+  tagline: "Get notified when websites change"
+  description: "Monitors websites for changes and sends you notifications when something updates. Supports JavaScript-rendered pages via a built-in Playwright browser for reliable detection."
+  icon: "search"
+  category: "automation"
+  required: false
+  default: false
+  ram: "~200MB"
+  theme:
+    emoji: "\uD83D\uDD0D"
+    color: "#7b68ee"
+    bg: "rgba(123,104,238,0.12)"
+  tips:
+    - "Add a URL and set a check interval to start monitoring any website for changes"
+    - "Use CSS selectors to watch only specific parts of a page for more precise alerts"
+  services:
+    changedetection:
+      friendly_name: "Changedetection.io"
+      description: "Website change detection and notification service"
+      port_map: 5000
+      tip: "Add URLs to watch and configure notifications to get alerted on changes"
+    playwright:
+      friendly_name: "Playwright Browser"
+      description: "Headless browser for JavaScript-rendered page monitoring"
+      port_map: null
+      tip: "Background service — renders JavaScript-heavy pages for change detection"
+
+networks:
+  sb_proxy:
+    external: true
+  sb_changedetection:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.20.0/24
+
+services:
+  changedetection:
+    image: ghcr.io/dgtlmoon/changedetection.io:0.48
+    container_name: sb-changedetection
+    ports:
+      - "127.0.0.1:5000:5000"
+    environment:
+      - TZ=${TZ:-UTC}
+      - PLAYWRIGHT_DRIVER_URL=ws://playwright:3000
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/changedetection/config:/datastore
+    depends_on:
+      playwright:
+        condition: service_healthy
+    networks:
+      - sb_changedetection
+      - sb_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.50'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always
+
+  playwright:
+    image: browserless/chrome:latest
+    container_name: sb-playwright
+    environment:
+      - TZ=${TZ:-UTC}
+      - DEFAULT_LAUNCH_ARGS=["--no-sandbox"]
+    networks:
+      - sb_changedetection
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.00'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/pressure"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always

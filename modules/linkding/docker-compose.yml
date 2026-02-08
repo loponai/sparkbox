@@ -1,0 +1,72 @@
+# ==========================================
+# SPARKBOX - Linkding Module
+# Self-hosted bookmark manager
+# ==========================================
+
+x-sparkbox:
+  id: linkding
+  title: "Linkding"
+  tagline: "Save and organize your bookmarks"
+  description: "A minimal, self-hosted bookmark manager. Save links from any browser, tag and search them, and never lose a useful webpage again. Includes a browser extension for one-click saving."
+  icon: "bookmark"
+  category: "tools"
+  required: false
+  default: false
+  ram: "~50MB"
+  theme:
+    emoji: "\uD83D\uDD17"
+    color: "#5856d6"
+    bg: "rgba(88,86,214,0.12)"
+  tips:
+    - "Install the browser extension for one-click bookmark saving"
+    - "Use tags to organize your bookmarks and find them quickly"
+  services:
+    linkding:
+      friendly_name: "Linkding"
+      description: "Bookmark manager with tagging and full-text search"
+      port_map: 9090
+      tip: "Install the Linkding browser extension to save bookmarks with one click"
+
+networks:
+  sb_proxy:
+    external: true
+  sb_linkding:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.15.0/24
+
+services:
+  # --- Linkding ---
+  # Self-hosted bookmark manager
+  linkding:
+    image: sissbruecker/linkding:1.36
+    container_name: sb-linkding
+    ports:
+      - "127.0.0.1:9090:9090"
+    environment:
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ${SB_ROOT:-/opt/sparkbox}/modules/linkding/config/data:/etc/linkding/data
+    networks:
+      - sb_linkding
+      - sb_proxy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.50'
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: always
